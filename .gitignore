@@ -1,0 +1,15 @@
+venv/
+*.pyc
+__pycache__/
+*.sqlite3
+db.sqlite3
+*.log
+.env
+.venv
+staticfiles/
+media/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
