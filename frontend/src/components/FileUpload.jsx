@@ -146,7 +146,8 @@ function FileUpload({ onUploadSuccess }) {
 
       {file && (
         <div className="mt-6">
-          <div className="mb-4 flex justify-center">
+          <div className="mb-4 flex flex-col items-center gap-3">
+            <p className="text-sm text-gray-600 font-medium">Chọn mô hình xử lý:</p>
             <div className="inline-flex rounded-md shadow-sm" role="group">
               <button
                 type="button"
@@ -162,7 +163,7 @@ function FileUpload({ onUploadSuccess }) {
               <button
                 type="button"
                 onClick={() => setOcrModel('mistral')}
-                className={`px-4 py-2 text-sm font-medium border rounded-r-lg ${
+                className={`px-4 py-2 text-sm font-medium border-t border-b ${
                   ocrModel === 'mistral'
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -170,7 +171,23 @@ function FileUpload({ onUploadSuccess }) {
               >
                 Mistral Large
               </button>
+              <button
+                type="button"
+                onClick={() => setOcrModel('mistral-ocr')}
+                className={`px-4 py-2 text-sm font-medium border rounded-r-lg ${
+                  ocrModel === 'mistral-ocr'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Mistral OCR + Small
+              </button>
             </div>
+            <p className="text-xs text-gray-500 text-center max-w-md">
+              {ocrModel === 'gemini' && 'Sử dụng Gemini 2.0 Flash - Hỗ trợ bounding box cho annotations'}
+              {ocrModel === 'mistral' && 'Sử dụng Mistral Large - Mô hình lớn, chính xác cao'}
+              {ocrModel === 'mistral-ocr' && 'Sử dụng Mistral OCR (Pixtral) + Mistral Small - OCR native cho PDF scan'}
+            </p>
           </div>
 
           <div className="flex gap-3 justify-center">

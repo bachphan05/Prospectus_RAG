@@ -17,6 +17,7 @@ class Document(models.Model):
     OCR_MODEL_CHOICES = [
         ('gemini', 'Gemini 2.0 Flash'),
         ('mistral', 'Mistral Large'),
+        ('mistral-ocr', 'Mistral OCR + Small'),
     ]
     
     MODEL_CHOICES = [

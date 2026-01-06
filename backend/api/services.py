@@ -503,13 +503,41 @@ Extract ALL relevant financial information from this prospectus document and str
 
 **IMPORTANT**: For every field, return an object with {{ "value": "...", "page": N, "bbox": [ymin, xmin, ymax, xmax] }}.
 
-**Coordinate System**: Use a 0-1000 scale where:
-  - (0, 0) is the TOP-LEFT corner of the page
-  - (1000, 1000) is the BOTTOM-RIGHT corner
-  - ymin: distance from top edge to top of text box
-  - xmin: distance from left edge to left of text box
-  - ymax: distance from top edge to bottom of text box
-  - xmax: distance from left edge to right of text box
+### CRITICAL: ACCURATE BOUNDING BOX COORDINATES ###
+
+**COORDINATE SYSTEM - READ CAREFULLY**:
+- Use a **0-1000 scale** for EACH page independently
+- **Origin (0,0)**: TOP-LEFT corner of the page
+- **Maximum (1000,1000)**: BOTTOM-RIGHT corner of the page
+- **bbox format**: [ymin, xmin, ymax, xmax]
+
+**MEASUREMENT GUIDE**:
+1. **ymin**: Distance from TOP edge to TOP of text (0 = very top of page)
+2. **xmin**: Distance from LEFT edge to LEFT of text (0 = very left of page)
+3. **ymax**: Distance from TOP edge to BOTTOM of text
+4. **xmax**: Distance from LEFT edge to RIGHT of text
+
+**CALIBRATION EXAMPLES** (assuming standard A4 page):
+- Text at very top-left corner: bbox ≈ [50, 50, 100, 300]
+- Text in center of page: bbox ≈ [450, 350, 500, 650]
+- Text at bottom-right: bbox ≈ [900, 700, 950, 950]
+- Full-width section title: bbox ≈ [200, 100, 250, 900]
+
+**ACCURACY TIPS**:
+1. **Measure text boundaries tightly** - don't include excessive whitespace
+2. **For multi-line text**: ymin = top of first line, ymax = bottom of last line
+3. **For fee tables**: Extract the ENTIRE table section, not individual cells
+4. **Verify coordinates**: ymax > ymin, xmax > xmin, all values 0-1000
+5. **Common mistakes to avoid**:
+   - Don't use (x,y) order - use [ymin, xmin, ymax, xmax]
+   - Don't measure from bottom of page - always from top
+   - Don't use pixel coordinates - use 0-1000 scale
+
+**VALIDATION RULES**:
+- 0 ≤ ymin < ymax ≤ 1000
+- 0 ≤ xmin < xmax ≤ 1000
+- Typical text height (ymax - ymin): 30-80 for single line, 100-200 for section
+- Typical text width varies by content length
 
 **Example Structure**:
 If "Quỹ Đầu Tư Cân Bằng VCBF" appears on page 1 at the top-center:
@@ -659,8 +687,143 @@ Now extract the data from the provided document."""
             text = text[:-3]
         return text.strip()
 
+class MistralOCRSmallService:
+    """
+    Service for OCR using Mistral's native OCR API (Step 1) 
+    + Mistral Small for JSON extraction (Step 2)
+    """
+    
+    def __init__(self):
+        api_key = os.getenv('MISTRAL_API_KEY')
+        if not api_key:
+            raise ValueError("MISTRAL_API_KEY environment variable is not set")
+        
+        self.client = Mistral(api_key=api_key)
+        # We use the specific OCR endpoint, not a chat model name for step 1
+        self.extraction_model = "mistral-small-latest"  
+    
+    def extract_structured_data(self, pdf_path: str) -> dict:
+        try:
+            logger.info(f"Uploading PDF to Mistral OCR: {pdf_path}")
+            
+            # --- STEP 1: Upload file to Mistral (Required for OCR API) ---
+            with open(pdf_path, "rb") as f:
+                uploaded_file = self.client.files.upload(
+                    file={
+                        "file_name": os.path.basename(pdf_path),
+                        "content": f,
+                    },
+                    purpose="ocr"
+                )
+            
+            # Get signed URL
+            signed_url = self.client.files.get_signed_url(file_id=uploaded_file.id)
+            
+            # --- STEP 2: Run Native Mistral OCR ---
+            logger.info("Running Mistral OCR...")
+            ocr_response = self.client.ocr.process(
+                model="mistral-ocr-latest",
+                document={
+                    "type": "document_url",
+                    "document_url": signed_url.url,
+                },
+                include_image_base64=False 
+            )
+            
+            # Combine markdown from all pages
+            # Mistral OCR returns pages with 'markdown' content
+            full_markdown = ""
+            for i, page in enumerate(ocr_response.pages):
+                full_markdown += f"\n\n--- PAGE {i+1} ---\n{page.markdown}"
+            
+            logger.info(f"OCR Success. Extracted {len(full_markdown)} characters.")
+
+            # --- STEP 3: Parse with Mistral Small ---
+            prompt = self._get_extraction_prompt()
+            
+            chat_response = self.client.chat.complete(
+                model=self.extraction_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a financial data extraction assistant specializing in Vietnamese mutual fund documents. Extract structured data accurately and return ONLY valid JSON. Pay special attention to Vietnamese field names like 'Công ty quản lý quỹ' and 'Ngân hàng giám sát'."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{prompt}\n\n--- DOCUMENT CONTENT (Markdown from OCR) ---\n{full_markdown}"
+                    }
+                ],
+                response_format={"type": "json_object"},
+                temperature=0
+            )
+
+            response_content = chat_response.choices[0].message.content
+            
+            # Cleanup (Optional: Delete file from Mistral storage if needed, 
+            # though Mistral usually cleans up temp files automatically or allows them to expire)
+            
+            try:
+                return json.loads(response_content)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON: {response_content[:200]}...")
+                return {"error": "Failed to parse JSON", "raw_text": response_content}
+
+        except Exception as e:
+            logger.error(f"Error in Mistral OCR+Small pipeline: {str(e)}")
+            raise
+
+    def _get_extraction_prompt(self) -> str:
+        """Get the extraction prompt - matches Gemini's detailed instructions"""
+        return """You are extracting structured data from a Vietnamese mutual fund prospectus (Bản cáo bạch quỹ mở).
+
+Extract the following information and return as JSON:
+
+{
+  "fund_name": "Tên quỹ",
+  "fund_code": "Mã quỹ",
+  "management_company": "Công ty quản lý quỹ",
+  "custodian_bank": "Ngân hàng giám sát / Ngân hàng lưu ký",
+  "fees": {
+    "management_fee": "Phí quản lý (%/năm)",
+    "subscription_fee": "Phí mua/đăng ký",
+    "redemption_fee": "Phí bán/hoàn mua",
+    "switching_fee": "Phí chuyển đổi"
+  },
+  "portfolio": [
+    {"asset": "Tên tài sản", "value": "Giá trị", "percentage": "Tỷ lệ %"}
+  ],
+  "nav_history": [
+    {"date": "Ngày", "nav": "Giá trị NAV"}
+  ],
+  "dividend_history": [
+    {"date": "Ngày", "amount": "Số tiền"}
+  ]
+}
+
+IMPORTANT EXTRACTION RULES:
+1. Return ONLY valid JSON
+2. Use null for missing values
+3. Empty arrays [] for missing lists
+4. Keep original Vietnamese text
+5. Extract exact numbers and percentages
+
+KEY FIELD MAPPINGS (Vietnamese → JSON):
+- "Tên quỹ" → fund_name
+- "Mã quỹ" / "Mã chứng chỉ quỹ" → fund_code
+- "Công ty quản lý" / "Công ty quản lý quỹ" / "CTQL" → management_company
+- "Ngân hàng giám sát" / "Ngân hàng lưu ký" / "NH giám sát" → custodian_bank
+
+FEE EXTRACTION (Look in "Thông tin phí", "Biểu phí" sections):
+1. "Phí phát hành" / "Phí mua" / "Phí đăng ký mua" → subscription_fee
+2. "Phí mua lại" / "Phí bán" / "Phí rút vốn" → redemption_fee
+3. "Phí quản lý" / "Phí quản lý thường niên" → management_fee
+4. "Phí chuyển đổi" → switching_fee
+
+Extract fees EXACTLY as written (keep "5,0%", "Tối đa 1,5%/năm", "N/A", etc.)
+
+Now extract the data from the provided document."""
 class MistralOCRService:
-    """Service for OCR using Mistral AI"""
+    """Service for OCR using Mistral AI (Large model with text extraction)"""
     
     def __init__(self):
         # Configure Mistral API
@@ -672,67 +835,55 @@ class MistralOCRService:
         self.model = "mistral-large-latest"
     
     def extract_structured_data(self, pdf_path: str) -> dict:
-        """
-        Extract financial data from PDF using Mistral AI.
-        Since Mistral API doesn't accept PDF uploads directly like Gemini,
-        we extract text using PyMuPDF (fitz) first, then send to LLM.
-        """
         try:
-            logger.info(f"Extracting text from PDF for Mistral: {pdf_path}")
+            logger.info(f"Uploading PDF to Mistral OCR: {pdf_path}")
             
-            # 1. Extract text from the optimized PDF
-            doc = fitz.open(pdf_path)
-            full_text = ""
+            # BƯỚC 1: Upload file lên Mistral (Bắt buộc cho OCR API)
+            with open(pdf_path, "rb") as f:
+                uploaded_file = self.client.files.upload(
+                    file={
+                        "file_name": os.path.basename(pdf_path),
+                        "content": f,
+                    },
+                    purpose="ocr"
+                )
             
-            # Try standard text extraction first
-            for page_num, page in enumerate(doc):
-                page_text = page.get_text()
-                
-                # If page has very little text, it's likely a scanned image - use OCR
-                if len(page_text.strip()) < 50:
-                    try:
-                        logger.debug(f"Page {page_num} has little text, using OCR...")
-                        pix = page.get_pixmap(dpi=150)
-                        img_bytes = pix.tobytes("png")
-                        result = ocr_engine(img_bytes)
-                        
-                        if result and isinstance(result, tuple):
-                            result = result[0]
-                        
-                        if result:
-                            page_text = " ".join([res[1] for res in result])
-                            logger.debug(f"OCR extracted {len(page_text)} characters from page {page_num}")
-                    except Exception as ocr_error:
-                        logger.warning(f"OCR failed on page {page_num}: {ocr_error}")
-                        page_text = ""
-                
-                full_text += page_text + "\n---PAGE BREAK---\n"
+            # Lấy signed URL để xử lý
+            signed_url = self.client.files.get_signed_url(file_id=uploaded_file.id)
             
-            doc.close()
+            # BƯỚC 2: Gọi Native OCR API (Dùng hàm ocr.process)
+            # Lưu ý: Không cần convert sang ảnh thủ công, Mistral tự đọc PDF
+            logger.info("Running Mistral OCR...")
+            ocr_response = self.client.ocr.process(
+                model="mistral-ocr-latest",
+                document={
+                    "type": "document_url",
+                    "document_url": signed_url.url,
+                },
+                include_image_base64=False 
+            )
+            
+            # Gộp kết quả Markdown từ các trang
+            full_markdown = ""
+            for i, page in enumerate(ocr_response.pages):
+                full_markdown += f"\n\n--- PAGE {i+1} ---\n{page.markdown}"
+            
+            logger.info(f"OCR Success. Extracted {len(full_markdown)} characters.")
 
-            # If text is still empty after OCR attempts, return error
-            if len(full_text.strip()) < 100:
-                logger.error("Extracted text is too short even after OCR. Cannot process document.")
-                return {
-                    "error": "Document appears to be empty or unreadable. Please ensure the PDF contains text or clear scanned images.",
-                    "portfolio": [],
-                    "nav_history": [],
-                    "dividend_history": []
-                }
-
+            # BƯỚC 3: Gửi Markdown sang Mistral Small để lấy JSON
+            # (Lúc này mới dùng chat.complete)
             prompt = self._get_extraction_prompt()
             
-            # 2. Send to Mistral
             chat_response = self.client.chat.complete(
-                model=self.model,
+                model=self.extraction_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a financial data extraction assistant. You output only valid JSON."
+                        "content": "You are a financial data assistant. Extract data from the provided Markdown content into valid JSON."
                     },
                     {
                         "role": "user",
-                        "content": f"{prompt}\n\nDOCUMENT CONTENT:\n{full_text}"
+                        "content": f"{prompt}\n\n--- DOCUMENT CONTENT (Markdown) ---\n{full_markdown}"
                     }
                 ],
                 response_format={"type": "json_object"},
@@ -741,15 +892,13 @@ class MistralOCRService:
 
             response_content = chat_response.choices[0].message.content
             
-            # 3. Parse Response
-            try:
-                return json.loads(response_content)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse JSON response: {response_content[:200]}...")
-                return {"error": "Failed to parse JSON", "raw_text": response_content}
+            return json.loads(response_content)
 
         except Exception as e:
-            logger.error(f"Error extracting text with Mistral: {str(e)}")
+            logger.error(f"Error in Mistral OCR+Small pipeline: {str(e)}")
+            # Nếu lỗi này là do chưa add thẻ (400/403), hãy check log
+            if "Invalid model" in str(e) or "400" in str(e):
+                logger.error("HINT: Ensure your Mistral account has Billing enabled for OCR models.")
             raise
     
     def _get_extraction_schema(self) -> dict:
@@ -970,6 +1119,7 @@ class DocumentProcessingService:
     def __init__(self):
         self._gemini_service = None
         self._mistral_service = None
+        self._mistral_ocr_small_service = None
     
     def _get_gemini_service(self):
         """Lazy initialization of Gemini service"""
@@ -982,6 +1132,12 @@ class DocumentProcessingService:
         if self._mistral_service is None:
             self._mistral_service = MistralOCRService()
         return self._mistral_service
+    
+    def _get_mistral_ocr_small_service(self):
+        """Lazy initialization of Mistral OCR + Small service"""
+        if self._mistral_ocr_small_service is None:
+            self._mistral_ocr_small_service = MistralOCRSmallService()
+        return self._mistral_ocr_small_service
     
     def process_document(self, document_id: int):
         thread = threading.Thread(
@@ -1009,19 +1165,34 @@ class DocumentProcessingService:
                 optimized_pdf_path = document.file.path
 
             # --- STEP 2: Call AI Service ---
+            import time
+            start_time = time.time()
+            
             try:
+                logger.info(f"Starting extraction with model: {document.ocr_model}")
                 if document.ocr_model == 'mistral':
                     extracted_data = self._get_mistral_service().extract_structured_data(optimized_pdf_path)
+                elif document.ocr_model == 'mistral-ocr':
+                    extracted_data = self._get_mistral_ocr_small_service().extract_structured_data(optimized_pdf_path)
                 else:
                     extracted_data = self._get_gemini_service().extract_structured_data(optimized_pdf_path)
+                
+                extraction_time = time.time() - start_time
+                logger.info(f"✓ Extraction completed with {document.ocr_model} in {extraction_time:.2f} seconds")
+                
             except Exception as e:
                 # If optimization caused an issue (e.g. 400 error), try original file as fallback
                 if optimized_pdf_path != document.file.path:
                     logger.warning(f"Extraction failed with optimized PDF, retrying with original: {e}")
+                    start_time = time.time()
                     if document.ocr_model == 'mistral':
                         extracted_data = self._get_mistral_service().extract_structured_data(document.file.path)
+                    elif document.ocr_model == 'mistral-ocr':
+                        extracted_data = self._get_mistral_ocr_small_service().extract_structured_data(document.file.path)
                     else:
                         extracted_data = self._get_gemini_service().extract_structured_data(document.file.path)
+                    extraction_time = time.time() - start_time
+                    logger.info(f"✓ Extraction completed (fallback) with {document.ocr_model} in {extraction_time:.2f} seconds")
                 else:
                     raise e
             
@@ -1085,6 +1256,16 @@ class DocumentProcessingService:
 
             # Update the document's extracted_data with the sanitized values
             document.extracted_data = extracted_data
+            
+            # Log key extracted fields for comparison
+            logger.info(f"📊 Model: {document.ocr_model} | Extraction Summary:")
+            logger.info(f"  ├─ Fund Name: {extracted_data.get('fund_name', 'NOT FOUND')}")
+            logger.info(f"  ├─ Fund Code: {extracted_data.get('fund_code', 'NOT FOUND')}")
+            logger.info(f"  ├─ Management Company: {extracted_data.get('management_company', 'NOT FOUND')}")
+            logger.info(f"  ├─ Custodian Bank: {extracted_data.get('custodian_bank', 'NOT FOUND')}")
+            logger.info(f"  ├─ Portfolio Items: {len(extracted_data.get('portfolio', []))}")
+            logger.info(f"  ├─ NAV History: {len(extracted_data.get('nav_history', []))}")
+            logger.info(f"  └─ Dividend History: {len(extracted_data.get('dividend_history', []))}")
 
             # Helper function to extract value from either structured or flat format
             def get_value(field_data):
