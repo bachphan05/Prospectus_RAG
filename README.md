@@ -1,230 +1,165 @@
-# Intelligent Document Processing System
+# Intelligent Document Processing and Analysis System
 
-An AI-powered system for extracting financial data from investment fund prospectuses using Django REST Framework, React, and Google Gemini 2.0.
+A comprehensive enterprise-grade solution for extracting, analyzing, and querying financial data from investment fund prospectuses. This system leverages advanced Large Language Models (LLMs) including Google Gemini 2.0 Flash and Mistral Large, combined with vector-based Retrieval-Augmented Generation (RAG) for deep document understanding.
 
-## Project Structure
+## System Architecture
 
-```
-Project_OCR/
-├── backend/
-│   ├── api/                    # Django app for document processing
-│   │   ├── models.py          # Document and ExtractedFundData models
-│   │   ├── serializers.py     # DRF serializers
-│   │   ├── views.py           # API endpoints
-│   │   ├── services.py        # Gemini AI integration and processing
-│   │   └── urls.py            # API routes
-│   ├── config/                 # Django project settings
-│   ├── media/                  # Uploaded PDF files
-│   ├── manage.py
-│   ├── requirements.txt
-│   └── .env                    # Environment variables
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── FileUpload.jsx      # File upload component
-│   │   │   ├── Dashboard.jsx       # Results dashboard
-│   │   │   └── *.css               # Component styles
-│   │   ├── services/
-│   │   │   └── api.js              # API service layer
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   └── package.json
-└── venv/                       # Python virtual environment
-```
+### Core Components
+- **Backend**: Django REST Framework (DRF) serving as the orchestration layer.
+- **Frontend**: React.js with Vite, providing a responsive interface for document management and analytics.
+- **Database**: PostgreSQL with `pgvector` extension for storing structured relational data and high-dimensional vector embeddings.
+- **AI Engine**: Hybrid integration of Google Gemini 2.0 and Mistral AI for OCR, data extraction, and semantic reasoning.
+
+### Workflow
+1. **Ingestion**: PDF documents are uploaded, validated, and securely stored.
+2. **Preprocessing**: 
+   - **Optimization**: Smart page segmentation identifies and isolates high-value pages (e.g., fee schedules, portfolio tables) to reduce context window usage.
+   - **Hybrid OCR**: Routing logic selects between Text-PDF parsing and Mistral/Gemini vision capabilities for scanned documents.
+3. **Extraction**: Structured financial data (NAV, fees, portfolio holdings) is extracted into normalized JSON schemas.
+4. **Vectorization (RAG)**:
+   - Full document text is segmented into semantic chunks.
+   - Embeddings are generated using Gemini's text-embedding models.
+   - Vectors are indexed in PostgreSQL using HNSW (Hierarchical Navigable Small World) graphs for sub-millisecond similarity search.
+5. **Analysis**: Users can query documents via a chat interface. The system retrieves relevant context (RAG) and combines it with structured database records to provide hallucination-free answers.
 
 ## Features
 
+### Advanced Data Extraction
+- **Multi-Model Support**: Toggle between Gemini 2.0 Flash and Mistral Large/OCR models based on document complexity.
+- **Structured Normalization**: Automatically standardizes varying prospectus formats into a unified schema:
+  - Fund Identity (Name, Code, Management Company)
+  - Fee Structures (Subscription, Redemption, Management, Switching)
+  - Portfolio Holdings (Assets, Allocation percentages)
+  - Historical Data (NAV History, Dividend Distributions)
+- **Visual Grounding**: Generates bounding boxes for extracted fields, allowing users to visually verify data origins on the PDF.
+
+### Retrieval-Augmented Generation (RAG)
+- **Context-Aware Chat**: specialized Q&A system capable of answering complex financial questions (e.g., "Explain the risk profile," "Compare fees with industry average").
+- **Dual-Source Reasoning**: The answering engine synthesizes information from:
+  1. **Structured Data**: For precise queries (fees, codes, dates).
+  2. **Unstructured Vector Search**: For qualitative queries (investment strategy, risk factors).
+- **Source Attribution**: Citations link responses back to specific pages and text chunks.
+
+### Enterprise Features
+- **Audit Logging**: Comprehensive tracking of all data modifications and user actions (`DocumentChangeLog`).
+- **Versioning**: Track edits to extracted data with rollback capabilities.
+- **Performance Monitoring**: Dashboard for tracking processing success rates, latency, and confidence scores.
+
+## Technical Stack
+
 ### Backend
-- **Document Management**: Upload, store, and manage PDF documents
-- **AI Processing**: Extract financial data using Google Gemini 2.0 Flash
-- **Asynchronous Processing**: Non-blocking document processing with threading
-- **RESTful API**: Complete CRUD operations for documents
-- **Data Models**:
-  - `Document`: Stores metadata and processing status
-  - `ExtractedFundData`: Normalized extracted financial information
+- **Framework**: Django 6.0, Django REST Framework
+- **Database**: PostgreSQL 16 + `pgvector`
+- **AI/ML**: 
+  - Google Gemini SDK
+  - Mistral AI SDK
+  - `langchain-text-splitters` for RAG chunking
+  - `PyMuPDF` (Fitz) & `RapidOCR` for PDF manipulation
+- **Async Processing**: Python threading for non-blocking I/O
 
 ### Frontend
-- **File Upload**: Drag-and-drop PDF upload interface
-- **Dashboard**: View all documents and their processing status
-- **Data Visualization**: Display extracted fund information in tables
-- **PDF Viewer**: Side-by-side document preview
-- **Real-time Updates**: Auto-refresh for processing documents
-
-### Extracted Data Fields
-- Fund Name
-- Fund Code
-- Management Fee
-- Custodian Bank
-- Portfolio Holdings (array of assets)
+- **Framework**: React 18
+- **Build Tool**: Vite
+- **Styling**: Tailwind CSS
+- **State Management**: React Hooks & Context
+- **Visualization**: `recharts` for financial data, `react-pdf` for rendering
 
 ## Setup Instructions
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- PostgreSQL database (Neon)
-- Google Gemini API key
+- Python 3.12+ (Recommended)
+- Node.js 18+
+- PostgreSQL 15+ with `pgvector` extension installed
+- API Keys for Google Gemini and/or Mistral AI
 
-### Backend Setup
+### Backend Configuration
 
-1. **Navigate to backend directory:**
+1. **Clone and Navigate**:
    ```bash
+   git clone <repository-url>
    cd backend
    ```
 
-2. **Create and activate virtual environment:**
+2. **Environment Setup**:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python -m venv .venv
+   # Windows:
+   .venv\Scripts\activate
+   # Linux/Mac:
+   source .venv/bin/activate
    ```
 
-3. **Install dependencies:**
+3. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
+   *Note: Ensure C++ Build Tools are installed if compiling specific wheels is required.*
 
-4. **Configure environment variables:**
-   Create a `.env` file in the backend directory:
+4. **Environment Variables**:
+   Copy `.env.example` to `.env` and configure:
    ```env
-   DATABASE_URL=postgresql://user:password@host/database?sslmode=require
-   GEMINI_API_KEY=your_gemini_api_key_here
+   SECRET_KEY=your-secure-key
+   DATABASE_URL=postgresql://user:pass@localhost:5432/db_name
+   GEMINI_API_KEY=your_key
+   MISTRAL_API_KEY=your_key
+   DJANGO_DEBUG=False
    ```
 
-5. **Run migrations:**
+5. **Database Initialization**:
    ```bash
    python manage.py makemigrations
    python manage.py migrate
    ```
+   *This will enable the `vector` extension and create schemas.*
 
-6. **Create superuser (optional):**
-   ```bash
-   python manage.py createsuperuser
-   ```
-
-7. **Create required directories:**
-   ```bash
-   mkdir -p media logs
-   ```
-
-8. **Run development server:**
+6. **Launch Server**:
    ```bash
    python manage.py runserver
    ```
 
-   Backend will be available at: `http://localhost:8000`
+### Frontend Configuration
 
-### Frontend Setup
-
-1. **Navigate to frontend directory:**
+1. **Navigate**:
    ```bash
    cd frontend
    ```
 
-2. **Install dependencies:**
+2. **Install Packages**:
    ```bash
    npm install
    ```
 
-3. **Configure API URL (optional):**
-   Create a `.env` file in the frontend directory:
-   ```env
-   VITE_API_URL=http://localhost:8000/api
-   ```
-
-4. **Run development server:**
+3. **Launch Client**:
    ```bash
    npm run dev
    ```
 
-   Frontend will be available at: `http://localhost:5173`
+## API Documentation
 
-## API Endpoints
+### Core Endpoints
 
-### Documents
-- `GET /api/documents/` - List all documents
-- `POST /api/documents/` - Upload a new document
-- `GET /api/documents/{id}/` - Get document details
-- `DELETE /api/documents/{id}/` - Delete a document
-- `POST /api/documents/{id}/reprocess/` - Reprocess a document
-- `GET /api/documents/{id}/download/` - Download PDF file
-- `GET /api/documents/stats/` - Get processing statistics
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/documents/` | Upload document (triggers async extraction) |
+| `GET` | `/api/documents/{id}/` | Retrieve metadata and extracted JSON |
+| `PATCH` | `/api/documents/{id}/` | Manually correct extracted data |
+| `POST` | `/api/chat/` | Send RAG-based query to document context |
+| `GET` | `/api/documents/{id}/preview-page/{page}/` | Get rendered page with bounding box overlays |
+| `GET` | `/api/documents/{id}/change_logs/` | View audit trail of edits |
 
-### Utility
-- `GET /api/health/` - Health check endpoint
+## Future Improvements
 
-## Usage
+The following roadmap outlines planned enhancements to elevate the system's capabilities:
 
-1. **Upload a PDF**: 
-   - Drag and drop a PDF file or click to browse
-   - Click "Upload & Process"
-   - Document status will change from "pending" to "processing" to "completed"
-
-2. **View Results**:
-   - Click on a document in the list
-   - View extracted financial data
-   - See portfolio holdings in a table
-   - Preview the original PDF
-
-3. **Manage Documents**:
-   - Reprocess failed documents
-   - Delete documents
-   - Download original PDFs
-
-## Technologies Used
-
-### Backend
-- Django 6.0
-- Django REST Framework
-- PostgreSQL (Neon)
-- Google Generative AI (Gemini 2.0 Flash)
-- PyPDF2 for PDF processing
-- Python-dotenv for environment variables
-
-### Frontend
-- React 18
-- Vite
-- CSS3 with modern layouts
-- Fetch API for HTTP requests
-
-## Evaluation Support
-
-The system stores extracted data in JSON format, making it easy to:
-- Compare with ground truth data
-- Calculate Levenshtein Distance for text fields
-- Compute TEDS scores for table structures
-- Export data for further analysis
-
-## Future Enhancements
-
-- [ ] Celery integration for better async processing
-- [ ] Redis caching for improved performance
-- [ ] Batch processing multiple documents
-- [ ] Advanced analytics and reporting
-- [ ] Export to various formats (CSV, Excel)
-- [ ] User authentication and authorization
-- [ ] Document versioning
-- [ ] OCR support for scanned documents
-
-## Troubleshooting
-
-### Backend Issues
-- **Database connection**: Verify DATABASE_URL in .env
-- **Gemini API errors**: Check GEMINI_API_KEY is valid
-- **Module errors**: Ensure all dependencies are installed
-
-### Frontend Issues
-- **API connection**: Check VITE_API_URL points to correct backend
-- **CORS errors**: Verify CORS settings in Django settings.py
+1.  **Distributed Task Queue**: Migrate from Python threading to Celery/Redis for robust, horizontally scalable background processing.
+2.  **Advanced RAG Techniques**:
+    -   Implement **Hybrid Search** (combining keyword BM25 with dense vector embeddings).
+    -   Add **Re-ranking** step to optimize context relevance provided to the LLM.
+    -   **Multi-Document Querying**: Allow users to ask questions across the entire document corpus (e.g., "Compare the management fees of all Balanced Funds").
+3.  **Authentication & Multi-Tenancy**: Implement OAuth2/JWT authentication to support multiple organizations with isolated data context.
+4.  **Feedback Loop**: Implement User-in-the-Loop (HITL) fine-tuning, where manual corrections to extracted data are fed back to improve future prompts or fine-tune smaller models.
+5.  **CI/CD Pipeline**: GitHub Actions workflows for automated testing, linting, and containerized deployment (Docker/Kubernetes).
 
 ## License
 
-MIT License
-
-## Competition Notes
-
-This system is designed for a tech competition focusing on Intelligent Document Processing. Key features for evaluation:
-- Accurate extraction of financial data
-- Clean, maintainable code structure
-- Modern tech stack
-- Scalable architecture
-- User-friendly interface
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
