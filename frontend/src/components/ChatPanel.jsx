@@ -97,7 +97,7 @@ function ChatPanel({ document, onClose }) {
           return [
             {
               sender: 'system',
-              text: `✅ Document ready! ${result.chunks_count} knowledge chunks available. You can ask questions now.`,
+              text: `Document ready (Tài liệu sẵn sàng)! ${result.chunks_count} knowledge chunks available (Có sẵn ${result.chunks_count} đoạn kiến thức). You can ask questions now (Bạn có thể đặt câu hỏi ngay).`,
               timestamp: new Date(),
             },
           ];
@@ -121,14 +121,14 @@ function ChatPanel({ document, onClose }) {
         return [
           {
             sender: 'system',
-            text: `✅ Document processed! Created ${result.chunks_count} knowledge chunks. You can now ask questions about this document.`,
+            text: `Document processed (Đã xử lý tài liệu)! Created ${result.chunks_count} knowledge chunks (Đã tạo ${result.chunks_count} đoạn kiến thức). You can now ask questions about this document (Bạn có thể hỏi về tài liệu này).`,
             timestamp: new Date(),
           },
         ];
       });
     } catch (err) {
       console.error('Ingestion error:', err);
-      setError(err.message || 'Failed to process document for chat');
+      setError(err.message || 'Failed to process document for chat (Xử lý tài liệu để trò chuyện thất bại)');
     } finally {
       setIsIngesting(false);
     }
@@ -187,7 +187,7 @@ function ChatPanel({ document, onClose }) {
       console.error('Chat error:', err);
       const errorMessage = {
         sender: 'system',
-        text: `❌ Error: ${err.message}`,
+        text: `Error (Lỗi): ${err.message}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -205,10 +205,10 @@ function ChatPanel({ document, onClose }) {
   };
 
   const suggestedQuestions = [
-    'What is the management fee?',
-    'Who is the custodian bank?',
-    'What are the fund\'s investment objectives?',
-    'What are the subscription and redemption fees?',
+    'What is the management fee? (Phí quản lý là bao nhiêu?)',
+    'Who is the custodian bank? (Ngân hàng giám sát là ai?)',
+    'What are the fund\'s investment objectives? (Mục tiêu đầu tư của quỹ là gì?)',
+    'What are the subscription and redemption fees? (Phí mua và phí bán là bao nhiêu?)',
   ];
 
   return (
@@ -231,7 +231,7 @@ function ChatPanel({ document, onClose }) {
               />
             </svg>
             <div>
-              <h2 className="text-lg font-semibold text-white">Chat with Document</h2>
+              <h2 className="text-lg font-semibold text-white">Chat with document (Trò chuyện với tài liệu)</h2>
               <p className="text-xs text-blue-100">{document.file_name}</p>
             </div>
           </div>
@@ -267,11 +267,11 @@ function ChatPanel({ document, onClose }) {
               />
             </svg>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              Process Document for Chat
+              Process document for chat (Xử lý tài liệu để trò chuyện)
             </h3>
             <p className="text-gray-600 text-center mb-6 max-w-md">
-              To enable AI-powered chat, we need to process this document first. This creates a
-              knowledge base that allows you to ask questions and get accurate answers.
+              To enable AI-powered chat, we need to process this document first (Để bật trò chuyện với AI, cần xử lý tài liệu trước). This creates a
+              knowledge base that allows you to ask questions and get accurate answers (Điều này tạo cơ sở kiến thức để bạn đặt câu hỏi và nhận câu trả lời chính xác).
             </p>
             <button
               onClick={handleIngest}
@@ -290,7 +290,7 @@ function ChatPanel({ document, onClose }) {
                   d="M13 10V3L4 14h7v7l9-11h-7z"
                 />
               </svg>
-              Process Document
+              Process document (Xử lý tài liệu)
             </button>
             {error && (
               <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
@@ -304,9 +304,9 @@ function ChatPanel({ document, onClose }) {
         {isIngesting && (
           <div className="flex-1 flex flex-col items-center justify-center p-8">
             <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Document...</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing document... (Đang xử lý tài liệu...)</h3>
             <p className="text-gray-600 text-center">
-              Creating knowledge chunks and generating embeddings. This may take 1-2 minutes.
+              Creating knowledge chunks and generating embeddings (Đang tạo đoạn kiến thức và embeddings). This may take 1-2 minutes (Có thể mất 1-2 phút).
             </p>
           </div>
         )}
@@ -319,7 +319,7 @@ function ChatPanel({ document, onClose }) {
               {messages.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-gray-600 mb-6">
-                    Ask me anything about this document. Try these questions:
+                    Ask me anything about this document (Hỏi bất kỳ điều gì về tài liệu này). Try these questions (Thử các câu hỏi sau):
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl mx-auto">
                     {suggestedQuestions.map((question, idx) => (
@@ -388,7 +388,7 @@ function ChatPanel({ document, onClose }) {
                           style={{ animationDelay: '0.2s' }}
                         ></div>
                       </div>
-                      <span className="text-xs text-gray-500">AI is thinking...</span>
+                      <span className="text-xs text-gray-500">AI is thinking... (AI đang suy nghĩ...)</span>
                     </div>
                   </div>
                 </div>
@@ -404,7 +404,7 @@ function ChatPanel({ document, onClose }) {
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Ask a question about this document..."
+                  placeholder="Ask a question about this document... (Hỏi về tài liệu này...)"
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                   rows="2"
                   disabled={isLoading}
@@ -434,7 +434,7 @@ function ChatPanel({ document, onClose }) {
                 </button>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                Press Enter to send, Shift+Enter for new line
+                Press Enter to send, Shift+Enter for new line (Nhấn Enter để gửi, Shift+Enter để xuống dòng)
               </p>
             </div>
           </>

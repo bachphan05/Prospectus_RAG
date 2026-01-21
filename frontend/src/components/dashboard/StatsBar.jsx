@@ -16,11 +16,11 @@ const StatsBar = ({ stats, loading }) => {
   }
 
   const statItems = [
-    { label: 'Tổng số', value: stats.total, color: 'text-gray-900', bgColor: 'bg-gray-50' },
-    { label: 'Chờ xử lý', value: stats.pending, color: 'text-yellow-600', bgColor: 'bg-yellow-50' },
-    { label: 'Đang xử lý', value: stats.processing, color: 'text-blue-600', bgColor: 'bg-blue-50' },
-    { label: 'Hoàn thành', value: stats.completed, color: 'text-green-600', bgColor: 'bg-green-50' },
-    { label: 'Thất bại', value: stats.failed, color: 'text-red-600', bgColor: 'bg-red-50' },
+    { label: 'Total (Tổng số)', value: stats.total, color: 'text-gray-900', bgColor: 'bg-gray-50' },
+    { label: 'Pending (Chờ xử lý)', value: stats.pending, color: 'text-yellow-600', bgColor: 'bg-yellow-50' },
+    { label: 'Processing (Đang xử lý)', value: stats.processing, color: 'text-blue-600', bgColor: 'bg-blue-50' },
+    { label: 'Completed (Hoàn thành)', value: stats.completed, color: 'text-green-600', bgColor: 'bg-green-50' },
+    { label: 'Failed (Thất bại)', value: stats.failed, color: 'text-red-600', bgColor: 'bg-red-50' },
   ];
 
   return (

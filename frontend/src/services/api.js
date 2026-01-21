@@ -25,7 +25,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.message || 'Upload failed');
+      throw new Error(error.message || 'Upload failed (Tải lên thất bại)');
     }
 
     return response.json();
@@ -39,7 +39,7 @@ class ApiService {
     const response = await fetch(`${API_BASE_URL}/documents/`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch documents');
+      throw new Error('Failed to fetch documents (Không thể tải danh sách tài liệu)');
     }
 
     return response.json();
@@ -54,7 +54,7 @@ class ApiService {
     const response = await fetch(`${API_BASE_URL}/documents/${id}/`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch document');
+      throw new Error('Failed to fetch document (Không thể tải tài liệu)');
     }
 
     return response.json();
@@ -71,7 +71,7 @@ class ApiService {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to reprocess document');
+      throw new Error('Failed to reprocess document (Xử lý lại tài liệu thất bại)');
     }
 
     return response.json();
@@ -94,7 +94,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.message || 'Failed to update document');
+      throw new Error(error.message || 'Failed to update document (Cập nhật tài liệu thất bại)');
     }
 
     return response.json();
@@ -111,7 +111,7 @@ class ApiService {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to delete document');
+      throw new Error('Failed to delete document (Xóa tài liệu thất bại)');
     }
 
     return true;
@@ -134,7 +134,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.message || 'Failed to update document');
+      throw new Error(error.message || 'Failed to update document (Cập nhật tài liệu thất bại)');
     }
 
     return response.json();
@@ -148,7 +148,7 @@ class ApiService {
     const response = await fetch(`${API_BASE_URL}/documents/stats/`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch stats');
+      throw new Error('Failed to fetch stats (Không thể tải thống kê)');
     }
 
     return response.json();
@@ -163,7 +163,7 @@ class ApiService {
     const response = await fetch(`${API_BASE_URL}/documents/${id}/optimized_pages/`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch optimized pages');
+      throw new Error('Failed to fetch optimized pages (Không thể tải các trang PDF đã tối ưu)');
     }
 
     return response.json();
@@ -178,7 +178,7 @@ class ApiService {
     const response = await fetch(`${API_BASE_URL}/documents/${id}/change_logs/`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch change logs');
+      throw new Error('Failed to fetch change logs (Không thể tải lịch sử chỉnh sửa)');
     }
 
     return response.json();
@@ -194,7 +194,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to check RAG status');
+      throw new Error(error.error || 'Failed to check RAG status (Không thể kiểm tra trạng thái RAG)');
     }
 
     return response.json();
@@ -210,7 +210,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || 'Failed to load chat history');
+      throw new Error(error.error || 'Failed to load chat history (Không thể tải lịch sử trò chuyện)');
     }
 
     return response.json();
@@ -233,7 +233,7 @@ class ApiService {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || 'Failed to save chat history');
+      throw new Error(error.error || 'Failed to save chat history (Không thể lưu lịch sử trò chuyện)');
     }
 
     return response.json();

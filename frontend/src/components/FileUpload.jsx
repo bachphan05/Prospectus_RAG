@@ -45,14 +45,14 @@ function FileUpload({ onUploadSuccess }) {
   const validateAndSetFile = (selectedFile) => {
     // Validate file type
     if (selectedFile.type !== 'application/pdf') {
-      setError('Vui lòng tải lên tệp PDF');
+      setError('Please upload a PDF file (Vui lòng tải lên tệp PDF)');
       return;
     }
 
     // Validate file size (max 100MB)
     const maxSize = 100 * 1024 * 1024;
     if (selectedFile.size > maxSize) {
-      setError('Kích thước tệp phải nhỏ hơn 100MB');
+      setError('File size must be under 100MB (Kích thước tệp phải nhỏ hơn 100MB)');
       return;
     }
 
@@ -61,7 +61,7 @@ function FileUpload({ onUploadSuccess }) {
 
   const handleUpload = async () => {
     if (!file) {
-      setError('Vui lòng chọn một tệp');
+      setError('Please select a file (Vui lòng chọn một tệp)');
       return;
     }
 
@@ -81,7 +81,7 @@ function FileUpload({ onUploadSuccess }) {
       }
     } catch (err) {
       console.error('Upload error:', err);
-      setError(err.message || 'Tải lên thất bại');
+      setError(err.message || 'Upload failed (Tải lên thất bại)');
     } finally {
       setUploading(false);
     }
@@ -117,12 +117,25 @@ function FileUpload({ onUploadSuccess }) {
         <label htmlFor="file-input" className="cursor-pointer block w-full h-full">
           {!file ? (
             <div className="flex flex-col items-center justify-center gap-3">
-              <div className="text-gray-400 text-5xl mb-2">📄</div>
+              <svg
+                className="w-12 h-12 text-gray-400 mb-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
               <p className="text-gray-700 font-medium text-lg">
-                Kéo và thả tệp PDF vào đây, hoặc nhấp để chọn
+                Drag and drop your PDF here, or click to browse (Kéo và thả tệp PDF vào đây, hoặc nhấp để chọn)
               </p>
               <p className="text-gray-500 text-sm">
-                Kích thước tối đa: 100MB
+                Maximum size: 100MB (Kích thước tối đa: 100MB)
               </p>
             </div>
           ) : (
@@ -139,7 +152,20 @@ function FileUpload({ onUploadSuccess }) {
 
       {error && (
         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-center gap-2">
-          <span className="text-lg">⚠️</span>
+          <svg
+            className="w-5 h-5 text-red-600 flex-shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
           {error}
         </div>
       )}
@@ -147,7 +173,7 @@ function FileUpload({ onUploadSuccess }) {
       {file && (
         <div className="mt-6">
           <div className="mb-4 flex flex-col items-center gap-3">
-            <p className="text-sm text-gray-600 font-medium">Chọn mô hình xử lý:</p>
+            <p className="text-sm text-gray-600 font-medium">Select processing model (Chọn mô hình xử lý):</p>
             <div className="inline-flex rounded-md shadow-sm" role="group">
               <button
                 type="button"
@@ -184,9 +210,9 @@ function FileUpload({ onUploadSuccess }) {
               </button>
             </div>
             <p className="text-xs text-gray-500 text-center max-w-md">
-              {ocrModel === 'gemini' && 'Sử dụng Gemini 2.0 Flash - Hỗ trợ bounding box cho annotations'}
-              {ocrModel === 'mistral' && 'Sử dụng Mistral Large - Mô hình lớn, chính xác cao'}
-              {ocrModel === 'mistral-ocr' && 'Sử dụng Mistral OCR (Pixtral) + Mistral Small - OCR native cho PDF scan'}
+              {ocrModel === 'gemini' && 'Use Gemini 2.0 Flash - Supports bounding boxes for annotations (Sử dụng Gemini 2.0 Flash - Hỗ trợ bounding box cho annotations)'}
+              {ocrModel === 'mistral' && 'Use Mistral Large - Large model, high accuracy (Sử dụng Mistral Large - Mô hình lớn, chính xác cao)'}
+              {ocrModel === 'mistral-ocr' && 'Use Mistral OCR (Pixtral) + Mistral Small - Native OCR for scanned PDFs (Sử dụng Mistral OCR (Pixtral) + Mistral Small - OCR native cho PDF scan)'}
             </p>
           </div>
 
@@ -196,7 +222,7 @@ function FileUpload({ onUploadSuccess }) {
               onClick={handleClear}
               disabled={uploading}
             >
-              Hủy
+              Cancel (Hủy)
             </button>
             <button
               className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -206,10 +232,10 @@ function FileUpload({ onUploadSuccess }) {
               {uploading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Đang tải lên...
+                  Uploading... (Đang tải lên...)
                 </>
               ) : (
-                'Tải lên & Xử lý'
+                'Upload & Process (Tải lên & Xử lý)'
               )}
             </button>
           </div>

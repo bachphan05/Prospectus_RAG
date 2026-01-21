@@ -15,14 +15,14 @@ function App() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <h1 className="text-2xl font-bold text-gray-900">Hệ thống Xử lý Tài liệu Thông minh</h1>
-          <p className="mt-1 text-sm text-gray-500">Trích xuất dữ liệu tài chính từ bản cáo bạch quỹ đầu tư bằng AI</p>
+          <h1 className="text-2xl font-bold text-gray-900">Intelligent Document Processing System (Hệ thống Xử lý Tài liệu Thông minh)</h1>
+          <p className="mt-1 text-sm text-gray-500">Extract financial data from fund prospectuses using AI (Trích xuất dữ liệu tài chính từ bản cáo bạch quỹ đầu tư bằng AI)</p>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <section className="bg-white rounded-lg shadow border border-gray-200 p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-6 text-center">Tải tài liệu lên</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-6 text-center">Upload document (Tải tài liệu lên)</h2>
           <FileUpload onUploadSuccess={handleUploadSuccess} />
         </section>
 
