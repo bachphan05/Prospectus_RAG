@@ -8,8 +8,20 @@ class ExtractedFundDataSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExtractedFundData
         fields = [
-            'fund_name', 'fund_code', 'management_company', 'custodian_bank',
+            'fund_name', 'fund_code',
+            'fund_type', 'legal_structure', 'license_number', 'regulator',
+            'management_company', 'custodian_bank', 'fund_supervisor',
             'management_fee', 'subscription_fee', 'redemption_fee', 'switching_fee',
+            'total_expense_ratio',
+            'custody_fee', 'audit_fee', 'supervisory_fee', 'other_expenses',
+            'investment_objective', 'investment_strategy', 'investment_style', 'sector_focus', 'benchmark',
+            'investment_restrictions', 'borrowing_limit', 'leverage_limit',
+            'concentration_risk', 'liquidity_risk', 'interest_rate_risk',
+            'trading_frequency', 'cut_off_time', 'nav_calculation_frequency', 'nav_publication', 'settlement_cycle',
+            'valuation_method', 'pricing_source',
+            'investor_rights', 'distribution_agent', 'sales_channels',
+            'auditor',
+            'asset_allocation', 'minimum_investment',
             'portfolio', 'nav_history', 'dividend_history',
             'created_at', 'updated_at'
         ]

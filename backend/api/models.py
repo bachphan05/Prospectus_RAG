@@ -101,23 +101,76 @@ class ExtractedFundData(models.Model):
     # Extracted fields - Identity info
     fund_name = models.CharField(max_length=500, blank=True, null=True)
     fund_code = models.CharField(max_length=100, blank=True, null=True)
+    fund_type = models.CharField(max_length=200, blank=True, null=True)
+    legal_structure = models.CharField(max_length=200, blank=True, null=True)
+    license_number = models.CharField(max_length=200, blank=True, null=True)
+    regulator = models.CharField(max_length=300, blank=True, null=True)
     management_company = models.CharField(max_length=500, blank=True, null=True)
     custodian_bank = models.CharField(max_length=300, blank=True, null=True)
+    fund_supervisor = models.CharField(max_length=300, blank=True, null=True)
     
     # Fee information (increased length to handle longer Vietnamese descriptions)
     management_fee = models.CharField(max_length=500, blank=True, null=True)
     subscription_fee = models.CharField(max_length=500, blank=True, null=True)
     redemption_fee = models.CharField(max_length=500, blank=True, null=True)
     switching_fee = models.CharField(max_length=500, blank=True, null=True)
+
+    # Investment objective & strategy
+    investment_objective = models.TextField(blank=True, null=True)
+    investment_strategy = models.TextField(blank=True, null=True)
+    investment_style = models.CharField(max_length=100, blank=True, null=True)  # active/passive/unknown
+    sector_focus = models.TextField(blank=True, null=True)
+    benchmark = models.CharField(max_length=300, blank=True, null=True)
+
+    # Additional fee info
+    total_expense_ratio = models.CharField(max_length=500, blank=True, null=True)
+    custody_fee = models.CharField(max_length=500, blank=True, null=True)
+    audit_fee = models.CharField(max_length=500, blank=True, null=True)
+    supervisory_fee = models.CharField(max_length=500, blank=True, null=True)
+    other_expenses = models.TextField(blank=True, null=True)
+
+    # Risk factors (high-level textual descriptions)
+    concentration_risk = models.TextField(blank=True, null=True)
+    liquidity_risk = models.TextField(blank=True, null=True)
+    interest_rate_risk = models.TextField(blank=True, null=True)
+
+    # Operational details (Thông tin giao dịch)
+    trading_frequency = models.CharField(max_length=200, blank=True, null=True)
+    cut_off_time = models.CharField(max_length=200, blank=True, null=True)
+    nav_calculation_frequency = models.CharField(max_length=200, blank=True, null=True)
+    nav_publication = models.CharField(max_length=300, blank=True, null=True)
+    settlement_cycle = models.CharField(max_length=200, blank=True, null=True)
+
+    # Valuation & pricing
+    valuation_method = models.TextField(blank=True, null=True)
+    pricing_source = models.TextField(blank=True, null=True)
+
+    # Investment restrictions & limits
+    investment_restrictions = models.TextField(blank=True, null=True)
+    borrowing_limit = models.CharField(max_length=200, blank=True, null=True)
+    leverage_limit = models.CharField(max_length=200, blank=True, null=True)
+
+    # Investor rights & distribution
+    investor_rights = models.TextField(blank=True, null=True)
+    distribution_agent = models.CharField(max_length=500, blank=True, null=True)
+    sales_channels = models.TextField(blank=True, null=True)
+
+    # Governance / partners
+    auditor = models.CharField(max_length=300, blank=True, null=True)
     
     # Portfolio and table data (stored as JSON arrays)
     portfolio = models.JSONField(default=list, blank=True)
     nav_history = models.JSONField(default=list, blank=True)
     dividend_history = models.JSONField(default=list, blank=True)
+
+    # Extended structured data (JSON)
+    asset_allocation = models.JSONField(default=dict, blank=True)
+    minimum_investment = models.JSONField(default=dict, blank=True)
     
     # Bounding boxes for extracted fields (for PDF highlighting)
     bboxes = models.JSONField(default=dict, blank=True)
     
+    analysis_report = models.JSONField(null=True, blank=True, help_text="AI-generated investment evaluation")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

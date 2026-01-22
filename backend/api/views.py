@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db import models as dj_models
 import logging
 import os
 import threading
@@ -146,23 +147,90 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     if isinstance(field_data, dict) and 'value' in field_data:
                         return field_data['value']
                     return field_data
+
+                def truncate_defaults_for_model(model_cls, defaults: dict) -> dict:
+                    """Ensure values fit DB column limits (e.g., CharField max_length)."""
+                    sanitized = dict(defaults)
+                    for field_name, field_value in sanitized.items():
+                        if not isinstance(field_value, str) or field_value is None:
+                            continue
+                        try:
+                            model_field = model_cls._meta.get_field(field_name)
+                        except Exception:
+                            continue
+                        if not isinstance(model_field, dj_models.CharField):
+                            continue
+                        max_len = getattr(model_field, 'max_length', None)
+                        if max_len and len(field_value) > max_len:
+                            logger.warning(
+                                f"Truncating {model_cls.__name__}.{field_name}: {len(field_value)} -> {max_len} chars"
+                            )
+                            sanitized[field_name] = field_value[:max_len]
+                    return sanitized
                 
                 # Update ExtractedFundData
-                ExtractedFundData.objects.update_or_create(
-                    document=instance,
-                    defaults={
+                fund_defaults = {
                         'fund_name': get_value(extracted_data.get('fund_name')),
                         'fund_code': get_value(extracted_data.get('fund_code')),
+                        'fund_type': get_value(extracted_data.get('fund_type')),
+                        'legal_structure': get_value(extracted_data.get('legal_structure')),
+                        'license_number': get_value(extracted_data.get('license_number')),
+                        'regulator': get_value(extracted_data.get('regulator')),
                         'management_company': get_value(extracted_data.get('management_company')),
                         'custodian_bank': get_value(extracted_data.get('custodian_bank')),
+                        'fund_supervisor': get_value(extracted_data.get('fund_supervisor')),
                         'management_fee': str(get_value(extracted_data.get('fees', {}).get('management_fee'))) if extracted_data.get('fees', {}).get('management_fee') else None,
                         'subscription_fee': str(get_value(extracted_data.get('fees', {}).get('subscription_fee'))) if extracted_data.get('fees', {}).get('subscription_fee') else None,
                         'redemption_fee': str(get_value(extracted_data.get('fees', {}).get('redemption_fee'))) if extracted_data.get('fees', {}).get('redemption_fee') else None,
                         'switching_fee': str(get_value(extracted_data.get('fees', {}).get('switching_fee'))) if extracted_data.get('fees', {}).get('switching_fee') else None,
+                        'total_expense_ratio': str(get_value(extracted_data.get('fees', {}).get('total_expense_ratio'))) if extracted_data.get('fees', {}).get('total_expense_ratio') else None,
+                        'custody_fee': str(get_value(extracted_data.get('fees', {}).get('custody_fee'))) if extracted_data.get('fees', {}).get('custody_fee') else None,
+                        'audit_fee': str(get_value(extracted_data.get('fees', {}).get('audit_fee'))) if extracted_data.get('fees', {}).get('audit_fee') else None,
+                        'supervisory_fee': str(get_value(extracted_data.get('fees', {}).get('supervisory_fee'))) if extracted_data.get('fees', {}).get('supervisory_fee') else None,
+                        'other_expenses': str(get_value(extracted_data.get('fees', {}).get('other_expenses'))) if extracted_data.get('fees', {}).get('other_expenses') else None,
+
+                        'investment_objective': get_value(extracted_data.get('investment_objective')),
+                        'investment_strategy': get_value(extracted_data.get('investment_strategy')),
+                        'investment_style': get_value(extracted_data.get('investment_style')),
+                        'sector_focus': get_value(extracted_data.get('sector_focus')),
+                        'benchmark': get_value(extracted_data.get('benchmark')),
+
+                        'valuation_method': get_value(extracted_data.get('valuation', {}).get('valuation_method')) if extracted_data.get('valuation') else get_value(extracted_data.get('valuation_method')),
+                        'pricing_source': get_value(extracted_data.get('valuation', {}).get('pricing_source')) if extracted_data.get('valuation') else get_value(extracted_data.get('pricing_source')),
+
+                        'investment_restrictions': get_value(extracted_data.get('investment_restrictions')),
+                        'borrowing_limit': get_value(extracted_data.get('borrowing_limit')),
+                        'leverage_limit': get_value(extracted_data.get('leverage_limit')),
+
+                        'investor_rights': get_value(extracted_data.get('investor_rights')),
+                        'distribution_agent': get_value(extracted_data.get('distribution_agent')),
+                        'sales_channels': get_value(extracted_data.get('sales_channels')),
+
+                        'concentration_risk': get_value(extracted_data.get('risk_factors', {}).get('concentration_risk')) if extracted_data.get('risk_factors') else get_value(extracted_data.get('concentration_risk')),
+                        'liquidity_risk': get_value(extracted_data.get('risk_factors', {}).get('liquidity_risk')) if extracted_data.get('risk_factors') else get_value(extracted_data.get('liquidity_risk')),
+                        'interest_rate_risk': get_value(extracted_data.get('risk_factors', {}).get('interest_rate_risk')) if extracted_data.get('risk_factors') else get_value(extracted_data.get('interest_rate_risk')),
+
+                        'trading_frequency': get_value(extracted_data.get('operational_details', {}).get('trading_frequency')) if extracted_data.get('operational_details') else get_value(extracted_data.get('trading_frequency')),
+                        'cut_off_time': get_value(extracted_data.get('operational_details', {}).get('cut_off_time')) if extracted_data.get('operational_details') else get_value(extracted_data.get('cut_off_time')),
+                        'nav_calculation_frequency': get_value(extracted_data.get('operational_details', {}).get('nav_calculation_frequency')) if extracted_data.get('operational_details') else get_value(extracted_data.get('nav_calculation_frequency')),
+                        'nav_publication': get_value(extracted_data.get('operational_details', {}).get('nav_publication')) if extracted_data.get('operational_details') else get_value(extracted_data.get('nav_publication')),
+                        'settlement_cycle': get_value(extracted_data.get('operational_details', {}).get('settlement_cycle')) if extracted_data.get('operational_details') else get_value(extracted_data.get('settlement_cycle')),
+
+                        'auditor': get_value(extracted_data.get('governance', {}).get('auditor')) if extracted_data.get('governance') else get_value(extracted_data.get('auditor')),
+
+                        'asset_allocation': extracted_data.get('asset_allocation') if isinstance(extracted_data.get('asset_allocation'), dict) else {},
+                        'minimum_investment': extracted_data.get('minimum_investment') if isinstance(extracted_data.get('minimum_investment'), dict) else {},
                         'portfolio': extracted_data.get('portfolio', []),
                         'nav_history': extracted_data.get('nav_history', []),
                         'dividend_history': extracted_data.get('dividend_history', []),
-                    }
+
+                }
+
+                fund_defaults = truncate_defaults_for_model(ExtractedFundData, fund_defaults)
+
+                ExtractedFundData.objects.update_or_create(
+                    document=instance,
+                    defaults=fund_defaults,
                 )
                 
                 logger.info(f"Document {instance.id} edited. Total edits: {instance.edit_count}")

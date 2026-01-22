@@ -19,7 +19,7 @@ function Dashboard({ refreshTrigger }) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [optimizedPages, setOptimizedPages] = useState(null);
-  const [loadingPages, setLoadingPages] = useState(false);
+  const [_loadingPages, setLoadingPages] = useState(false);
   const [selectedPage, setSelectedPage] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [hoveredField, setHoveredField] = useState(null); // For highlighting data fields (hover effect)
@@ -331,6 +331,28 @@ function Dashboard({ refreshTrigger }) {
                           updateEditedField={updateEditedField}
                         />
                         <DataField 
+                          label="Loại quỹ" 
+                          field={selectedDoc.extracted_data.fund_type}
+                          fieldName="fund_type"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Cấu trúc pháp lý" 
+                          field={selectedDoc.extracted_data.legal_structure}
+                          fieldName="legal_structure"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
                           label="Công ty quản lý" 
                           field={selectedDoc.extracted_data.management_company}
                           fieldName="management_company"
@@ -352,61 +374,517 @@ function Dashboard({ refreshTrigger }) {
                           setHoveredField={setHoveredField}
                           updateEditedField={updateEditedField}
                         />
+                        <DataField 
+                          label="Giám sát quỹ/Đại diện quỹ" 
+                          field={selectedDoc.extracted_data.fund_supervisor}
+                          fieldName="fund_supervisor"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Cơ quan quản lý" 
+                          field={selectedDoc.extracted_data.regulator}
+                          fieldName="regulator"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Số giấy phép" 
+                          field={selectedDoc.extracted_data.license_number}
+                          fieldName="license_number"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Đơn vị kiểm toán" 
+                          field={selectedDoc.extracted_data.auditor}
+                          fieldName="auditor"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Investment Objective & Strategy */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Mục tiêu & Chiến lược đầu tư</h3>
+                      <dl className="grid grid-cols-1 gap-y-4">
+                        <DataField 
+                          label="Mục tiêu đầu tư" 
+                          field={selectedDoc.extracted_data.investment_objective}
+                          fieldName="investment_objective"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Chiến lược/Chính sách đầu tư" 
+                          field={selectedDoc.extracted_data.investment_strategy}
+                          fieldName="investment_strategy"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                          <DataField 
+                            label="Phong cách đầu tư (Active/Passive)" 
+                            field={selectedDoc.extracted_data.investment_style}
+                            fieldName="investment_style"
+                            editable={true}
+                            isEditMode={isEditMode}
+                            editedData={editedData}
+                            hoveredField={hoveredField}
+                            setHoveredField={setHoveredField}
+                            updateEditedField={updateEditedField}
+                          />
+                          <DataField 
+                            label="Chỉ số tham chiếu (Benchmark)" 
+                            field={selectedDoc.extracted_data.benchmark}
+                            fieldName="benchmark"
+                            editable={true}
+                            isEditMode={isEditMode}
+                            editedData={editedData}
+                            hoveredField={hoveredField}
+                            setHoveredField={setHoveredField}
+                            updateEditedField={updateEditedField}
+                          />
+                        </div>
+                        <DataField 
+                          label="Tập trung ngành" 
+                          field={selectedDoc.extracted_data.sector_focus}
+                          fieldName="sector_focus"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
                       </dl>
                     </div>
 
                     {/* Fee Information */}
-                    {selectedDoc.extracted_data.fees && (
-                      <div>
-                        <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Phí dịch vụ</h3>
-                        <dl className="grid grid-cols-1 gap-y-4">
-                          <DataField 
-                            label="Phí quản lý" 
-                            field={selectedDoc.extracted_data.fees.management_fee}
-                            fieldName="fees.management_fee"
-                            editable={true}
-                            isEditMode={isEditMode}
-                            editedData={editedData}
-                            hoveredField={hoveredField}
-                            setHoveredField={setHoveredField}
-                            updateEditedField={updateEditedField}
-                          />
-                          <DataField 
-                            label="Phí giao dịch mua" 
-                            field={selectedDoc.extracted_data.fees.subscription_fee}
-                            fieldName="fees.subscription_fee"
-                            editable={true}
-                            isEditMode={isEditMode}
-                            editedData={editedData}
-                            hoveredField={hoveredField}
-                            setHoveredField={setHoveredField}
-                            updateEditedField={updateEditedField}
-                          />
-                          <DataField 
-                            label="Phí giao dịch bán" 
-                            field={selectedDoc.extracted_data.fees.redemption_fee}
-                            fieldName="fees.redemption_fee"
-                            editable={true}
-                            isEditMode={isEditMode}
-                            editedData={editedData}
-                            hoveredField={hoveredField}
-                            setHoveredField={setHoveredField}
-                            updateEditedField={updateEditedField}
-                          />
-                          <DataField 
-                            label="Phí chuyển đổi" 
-                            field={selectedDoc.extracted_data.fees.switching_fee}
-                            fieldName="fees.switching_fee"
-                            editable={true}
-                            isEditMode={isEditMode}
-                            editedData={editedData}
-                            hoveredField={hoveredField}
-                            setHoveredField={setHoveredField}
-                            updateEditedField={updateEditedField}
-                          />
-                        </dl>
-                      </div>
-                    )}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Phí dịch vụ</h3>
+                      <dl className="grid grid-cols-1 gap-y-4">
+                        <DataField 
+                          label="Phí quản lý" 
+                          field={selectedDoc.extracted_data.fees?.management_fee}
+                          fieldName="fees.management_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí phát hành/Phí mua (Subscription)" 
+                          field={selectedDoc.extracted_data.fees?.subscription_fee}
+                          fieldName="fees.subscription_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí mua lại/Phí bán (Redemption)" 
+                          field={selectedDoc.extracted_data.fees?.redemption_fee}
+                          fieldName="fees.redemption_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí chuyển đổi" 
+                          field={selectedDoc.extracted_data.fees?.switching_fee}
+                          fieldName="fees.switching_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Tổng tỷ lệ chi phí (TER)" 
+                          field={selectedDoc.extracted_data.fees?.total_expense_ratio}
+                          fieldName="fees.total_expense_ratio"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí lưu ký" 
+                          field={selectedDoc.extracted_data.fees?.custody_fee}
+                          fieldName="fees.custody_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí kiểm toán" 
+                          field={selectedDoc.extracted_data.fees?.audit_fee}
+                          fieldName="fees.audit_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Phí giám sát" 
+                          field={selectedDoc.extracted_data.fees?.supervisory_fee}
+                          fieldName="fees.supervisory_fee"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Chi phí khác" 
+                          field={selectedDoc.extracted_data.fees?.other_expenses}
+                          fieldName="fees.other_expenses"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Operational Details */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Thông tin giao dịch</h3>
+                      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <DataField 
+                          label="Tần suất giao dịch" 
+                          field={selectedDoc.extracted_data.operational_details?.trading_frequency}
+                          fieldName="operational_details.trading_frequency"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Giờ chốt lệnh" 
+                          field={selectedDoc.extracted_data.operational_details?.cut_off_time}
+                          fieldName="operational_details.cut_off_time"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Tần suất tính NAV" 
+                          field={selectedDoc.extracted_data.operational_details?.nav_calculation_frequency}
+                          fieldName="operational_details.nav_calculation_frequency"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Công bố NAV" 
+                          field={selectedDoc.extracted_data.operational_details?.nav_publication}
+                          fieldName="operational_details.nav_publication"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Chu kỳ thanh toán" 
+                          field={selectedDoc.extracted_data.operational_details?.settlement_cycle}
+                          fieldName="operational_details.settlement_cycle"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Đầu tư tối thiểu (lần đầu)" 
+                          field={selectedDoc.extracted_data.minimum_investment?.initial}
+                          fieldName="minimum_investment.initial"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Đầu tư tối thiểu (bổ sung)" 
+                          field={selectedDoc.extracted_data.minimum_investment?.additional}
+                          fieldName="minimum_investment.additional"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Đơn vị tiền tệ" 
+                          field={selectedDoc.extracted_data.minimum_investment?.currency}
+                          fieldName="minimum_investment.currency"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Valuation & Pricing */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Định giá & Nguồn giá</h3>
+                      <dl className="grid grid-cols-1 gap-y-4">
+                        <DataField 
+                          label="Phương pháp định giá" 
+                          field={selectedDoc.extracted_data.valuation?.valuation_method}
+                          fieldName="valuation.valuation_method"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Nguồn giá" 
+                          field={selectedDoc.extracted_data.valuation?.pricing_source}
+                          fieldName="valuation.pricing_source"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Restrictions & Limits */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Hạn chế & Giới hạn</h3>
+                      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <DataField 
+                          label="Hạn chế đầu tư" 
+                          field={selectedDoc.extracted_data.investment_restrictions}
+                          fieldName="investment_restrictions"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Hạn mức vay" 
+                          field={selectedDoc.extracted_data.borrowing_limit}
+                          fieldName="borrowing_limit"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Giới hạn đòn bẩy" 
+                          field={selectedDoc.extracted_data.leverage_limit}
+                          fieldName="leverage_limit"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Investor & Distribution */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Nhà đầu tư & Phân phối</h3>
+                      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <DataField 
+                          label="Quyền nhà đầu tư" 
+                          field={selectedDoc.extracted_data.investor_rights}
+                          fieldName="investor_rights"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Đại lý phân phối" 
+                          field={selectedDoc.extracted_data.distribution_agent}
+                          fieldName="distribution_agent"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Kênh phân phối" 
+                          field={selectedDoc.extracted_data.sales_channels}
+                          fieldName="sales_channels"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Asset Allocation */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Cơ cấu tài sản mục tiêu</h3>
+                      <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <DataField 
+                          label="Cổ phiếu (%)" 
+                          field={selectedDoc.extracted_data.asset_allocation?.stocks}
+                          fieldName="asset_allocation.stocks"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Trái phiếu (%)" 
+                          field={selectedDoc.extracted_data.asset_allocation?.bonds}
+                          fieldName="asset_allocation.bonds"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Tiền mặt (%)" 
+                          field={selectedDoc.extracted_data.asset_allocation?.cash}
+                          fieldName="asset_allocation.cash"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Khác (%)" 
+                          field={selectedDoc.extracted_data.asset_allocation?.other}
+                          fieldName="asset_allocation.other"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
+
+                    {/* Risk Factors */}
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900 border-b pb-2 mb-4">Rủi ro</h3>
+                      <dl className="grid grid-cols-1 gap-y-4">
+                        <DataField 
+                          label="Rủi ro tập trung" 
+                          field={selectedDoc.extracted_data.risk_factors?.concentration_risk}
+                          fieldName="risk_factors.concentration_risk"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Rủi ro thanh khoản" 
+                          field={selectedDoc.extracted_data.risk_factors?.liquidity_risk}
+                          fieldName="risk_factors.liquidity_risk"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                        <DataField 
+                          label="Rủi ro lãi suất" 
+                          field={selectedDoc.extracted_data.risk_factors?.interest_rate_risk}
+                          fieldName="risk_factors.interest_rate_risk"
+                          editable={true}
+                          isEditMode={isEditMode}
+                          editedData={editedData}
+                          hoveredField={hoveredField}
+                          setHoveredField={setHoveredField}
+                          updateEditedField={updateEditedField}
+                        />
+                      </dl>
+                    </div>
 
                     {/* Portfolio Information */}
                     {selectedDoc.extracted_data.portfolio && selectedDoc.extracted_data.portfolio.length > 0 && (

@@ -118,29 +118,6 @@ class ApiService {
   }
 
   /**
-   * Update a document's extracted data
-   * @param {number} id - Document ID
-   * @param {Object} data - Updated document data
-   * @returns {Promise} Updated document
-   */
-  async updateDocument(id, data) {
-    const response = await fetch(`${API_BASE_URL}/documents/${id}/`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to update document');
-    }
-
-    return response.json();
-  }
-
-  /**
    * Get processing statistics
    * @returns {Promise} Statistics object
    */

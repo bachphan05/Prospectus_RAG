@@ -1,4 +1,4 @@
-import { getValue, getFieldInfo } from './utils';
+import { getValue, getFieldInfo, isEffectivelyNA } from './utils';
 
 /**
  * DataField Component - Display/Edit field with hover functionality
@@ -33,6 +33,12 @@ const DataField = ({ label, field, fieldName, editable, isEditMode, editedData, 
   };
   
   const isHovered = hoveredField?.fieldName === fieldName;
+
+  // In view mode: hide fields that are effectively N/A.
+  // In edit mode: always show so users can fill missing values.
+  if (!isEditMode && isEffectivelyNA(displayValue)) {
+    return null;
+  }
   
   if (isEditMode && editable) {
     return (
@@ -60,7 +66,7 @@ const DataField = ({ label, field, fieldName, editable, isEditMode, editedData, 
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <span>{displayValue || 'N/A'}</span>
+        <span>{displayValue}</span>
         {info && (
           <span className="ml-2 text-xs text-gray-500 italic font-normal opacity-0 group-hover:opacity-100 transition-opacity">
             (Page {info.page})

@@ -6,10 +6,58 @@
  * @returns {*} The extracted value or the field itself if already a plain value
  */
 export const getValue = (field) => {
-  if (field && typeof field === 'object' && 'value' in field) {
-    return field.value; // New Gemini structured format
+  let value = field;
+
+  if (value && typeof value === 'object' && 'value' in value) {
+    value = value.value; // New Gemini structured format
   }
-  return field; // Old flat format or null/undefined
+
+  // Never return a raw object to React text nodes.
+  if (value && typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return value; // Old flat format or null/undefined
+};
+
+/**
+ * Utility: Determine if a displayed value should be treated as "N/A" and hidden.
+ * Handles common English/Vietnamese variants.
+ */
+export const isEffectivelyNA = (value) => {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'number') return false;
+
+  const str = String(value).trim().toLowerCase();
+  if (!str) return true;
+
+  // Common NA variants
+  const naValues = new Set([
+    'n/a',
+    'na',
+    'not applicable',
+    'none',
+    'null',
+    'undefined',
+    '-',
+    '--',
+    'khong ap dung',
+    'không áp dụng',
+    'khong co',
+    'không có',
+    'khong',
+    'không',
+    'khong xac dinh',
+    'không xác định',
+  ]);
+
+  // Remove diacritics for matching Vietnamese text.
+  const normalized = str.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  return naValues.has(str) || naValues.has(normalized);
 };
 
 /**

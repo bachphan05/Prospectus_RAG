@@ -127,6 +127,12 @@ def create_optimized_pdf(original_pdf_path: str) -> str:
                 "phí mua",
                 "phí bán",
                 "phí đăng ký",
+                "giá dịch vụ",      
+                "thù lao",           
+                "chi phí",           
+                "hoa hồng",          
+                "tối đa",            
+                "% giá trị",        
             ],
             "tables": [
                 "danh mục đầu tư",
@@ -354,17 +360,26 @@ class GeminiOCRService:
                 # Update simple fields to use the new object structure
                 "fund_name": field_with_loc,
                 "fund_code": field_with_loc,
+                "fund_type": field_with_loc,
+                "legal_structure": field_with_loc,
+                "license_number": field_with_loc,
+                "regulator": field_with_loc,
                 "management_company": field_with_loc,
                 "custodian_bank": field_with_loc,
+                "fund_supervisor": field_with_loc,
+                "auditor": field_with_loc,
                 "inception_date": {
                     "type": "string",
                     "format": "date",
                     "description": "Fund inception/establishment date (YYYY-MM-DD)"
                 },
-                "investment_objective": {
-                    "type": "string",
-                    "description": "Main investment objective of the fund"
-                },
+
+                # Investment objective & strategy
+                "investment_objective": field_with_loc,
+                "investment_strategy": field_with_loc,
+                "investment_style": field_with_loc,
+                "sector_focus": field_with_loc,
+                "benchmark": field_with_loc,
                 
                 # Fees object with location for each fee type
                 "fees": {
@@ -373,9 +388,55 @@ class GeminiOCRService:
                         "management_fee": field_with_loc,
                         "subscription_fee": field_with_loc,
                         "redemption_fee": field_with_loc,
-                        "switching_fee": field_with_loc
+                        "switching_fee": field_with_loc,
+                        "total_expense_ratio": field_with_loc,
+                        "custody_fee": field_with_loc,
+                        "audit_fee": field_with_loc,
+                        "supervisory_fee": field_with_loc,
+                        "other_expenses": field_with_loc
                     }
                 },
+
+                # Risk factors
+                "risk_factors": {
+                    "type": "object",
+                    "properties": {
+                        "concentration_risk": field_with_loc,
+                        "liquidity_risk": field_with_loc,
+                        "interest_rate_risk": field_with_loc
+                    }
+                },
+
+                # Operational details
+                "operational_details": {
+                    "type": "object",
+                    "properties": {
+                        "trading_frequency": field_with_loc,
+                        "cut_off_time": field_with_loc,
+                        "nav_calculation_frequency": field_with_loc,
+                        "nav_publication": field_with_loc,
+                        "settlement_cycle": field_with_loc
+                    }
+                },
+
+                # Valuation details
+                "valuation": {
+                    "type": "object",
+                    "properties": {
+                        "valuation_method": field_with_loc,
+                        "pricing_source": field_with_loc
+                    }
+                },
+
+                # Investment limits/restrictions
+                "investment_restrictions": field_with_loc,
+                "borrowing_limit": field_with_loc,
+                "leverage_limit": field_with_loc,
+
+                # Investor & distribution
+                "investor_rights": field_with_loc,
+                "distribution_agent": field_with_loc,
+                "sales_channels": field_with_loc,
                 
                 "minimum_investment": {
                     "type": "object",
@@ -620,10 +681,61 @@ IMPORTANT INSTRUCTIONS:
 9. For Dividend history, look for "Lịch sử chia cổ tức", "Phân phối lợi nhuận"
 10. Pay special attention to:
    - Fee structures (management, subscription, redemption fees)
+    - Total Expense Ratio (TER) / tổng chi phí (if present)
    - Minimum investment requirements
+    - Trading frequency (T+1 / daily / weekly) and cut-off time (giờ chốt lệnh)
    - Asset allocation percentages
+    - Benchmark (chỉ số tham chiếu) and investment style (active/passive)
    - Performance data
    - Risk classifications
+
+### CRITICAL: Additional fields to extract for fund evaluation ###
+Extract these fields if present (Vietnamese + English labels may appear):
+1. Investment objective & strategy:
+    - `investment_objective` (mục tiêu đầu tư)
+    - `investment_strategy` (chiến lược đầu tư / chính sách đầu tư)
+    - `asset_allocation` (cơ cấu tài sản mục tiêu: cổ phiếu / trái phiếu / tiền)
+    - `investment_style` (active / passive; “chủ động” / “thụ động”)
+    - `sector_focus` (tập trung ngành / diversified)
+    - `benchmark` (chỉ số tham chiếu)
+2. Fee structure:
+    - `fees.total_expense_ratio` (TER / tổng chi phí / tổng tỷ lệ chi phí)
+3. Risk factors:
+    - `risk_factors.concentration_risk` (rủi ro tập trung)
+    - `risk_factors.liquidity_risk` (rủi ro thanh khoản)
+    - `risk_factors.interest_rate_risk` (rủi ro lãi suất)
+4. Operational details:
+    - `operational_details.trading_frequency` (tần suất giao dịch: hàng ngày/tuần; T+1)
+    - `operational_details.cut_off_time` (giờ chốt lệnh)
+    - `operational_details.nav_calculation_frequency` (tần suất tính NAV: hàng ngày/tuần/tháng)
+    - `operational_details.nav_publication` (công bố NAV ở đâu/khi nào)
+    - `operational_details.settlement_cycle` (chu kỳ thanh toán: T+1/T+2)
+5. Legal & regulatory:
+    - `fund_type` (loại quỹ: quỹ mở/quỹ đóng/ETF)
+    - `legal_structure` (cấu trúc pháp lý)
+    - `license_number` (số giấy phép)
+    - `regulator` (cơ quan quản lý: UBCKNN, etc.)
+    - `fund_supervisor` (giám sát quỹ / đại diện quỹ)
+6. Valuation:
+    - `valuation.valuation_method` (phương pháp định giá)
+    - `valuation.pricing_source` (nguồn giá)
+7. Investment restrictions & limits:
+    - `investment_restrictions` (hạn chế đầu tư)
+    - `borrowing_limit` (hạn mức vay)
+    - `leverage_limit` (đòn bẩy)
+8. Investor & distribution:
+    - `investor_rights` (quyền nhà đầu tư)
+    - `distribution_agent` (đại lý phân phối)
+    - `sales_channels` (kênh phân phối)
+9. Detailed expenses:
+    - `fees.custody_fee` (phí lưu ký)
+    - `fees.audit_fee` (phí kiểm toán)
+    - `fees.supervisory_fee` (phí giám sát)
+    - `fees.other_expenses` (chi phí khác)
+5. Governance and partners:
+    - `management_company` (công ty quản lý quỹ)
+    - `custodian_bank` (ngân hàng giám sát/lưu ký)
+    - `auditor` (đơn vị kiểm toán)
 
 ### CRITICAL INSTRUCTIONS FOR FEE EXTRACTION:
 **YOU MUST EXTRACT ALL 4 FEE TYPES as structured objects with value, page, and bbox.**
@@ -949,14 +1061,54 @@ Extract the following information and return as JSON:
 {
   "fund_name": "Tên quỹ",
   "fund_code": "Mã quỹ",
+    "fund_type": "Loại quỹ (quỹ mở/quỹ đóng/ETF)",
+    "legal_structure": "Cấu trúc pháp lý",
+    "license_number": "Số giấy phép/Quyết định",
+    "regulator": "Cơ quan quản lý (UBCKNN, ...)",
   "management_company": "Công ty quản lý quỹ",
   "custodian_bank": "Ngân hàng giám sát / Ngân hàng lưu ký",
+    "fund_supervisor": "Giám sát quỹ / đại diện quỹ (nếu có)",
   "fees": {
     "management_fee": "Phí quản lý (%/năm)",
     "subscription_fee": "Phí mua/đăng ký",
     "redemption_fee": "Phí bán/hoàn mua",
-    "switching_fee": "Phí chuyển đổi"
+        "switching_fee": "Phí chuyển đổi",
+        "total_expense_ratio": "TER / Tổng tỷ lệ chi phí (nếu có)",
+        "custody_fee": "Phí lưu ký (nếu có)",
+        "audit_fee": "Phí kiểm toán (nếu có)",
+        "supervisory_fee": "Phí giám sát (nếu có)",
+        "other_expenses": "Chi phí khác (nếu có)"
   },
+    "investment_objective": "Mục tiêu đầu tư",
+    "investment_strategy": "Chiến lược/Chính sách đầu tư",
+    "investment_style": "Chủ động/Thụ động (Active/Passive)",
+    "sector_focus": "Tập trung ngành (nếu có)",
+    "benchmark": "Chỉ số tham chiếu (nếu có)",
+    "investment_restrictions": "Hạn chế đầu tư",
+    "borrowing_limit": "Hạn mức vay",
+    "leverage_limit": "Giới hạn đòn bẩy",
+    "risk_factors": {
+        "concentration_risk": "Rủi ro tập trung",
+        "liquidity_risk": "Rủi ro thanh khoản",
+        "interest_rate_risk": "Rủi ro lãi suất"
+    },
+    "operational_details": {
+        "trading_frequency": "Tần suất giao dịch (Daily/Weekly/T+1, ...)",
+        "cut_off_time": "Giờ chốt lệnh",
+        "nav_calculation_frequency": "Tần suất tính NAV",
+        "nav_publication": "Công bố NAV",
+        "settlement_cycle": "Chu kỳ thanh toán (T+1/T+2)"
+    },
+    "valuation": {
+        "valuation_method": "Phương pháp định giá",
+        "pricing_source": "Nguồn giá"
+    },
+    "auditor": "Đơn vị kiểm toán",
+    "distribution_agent": "Đại lý phân phối",
+    "sales_channels": "Kênh phân phối",
+    "investor_rights": "Quyền nhà đầu tư",
+    "asset_allocation": {"stocks": 0, "bonds": 0, "cash": 0, "other": 0},
+    "minimum_investment": {"initial": 0, "additional": 0, "currency": "VND"},
   "portfolio": [
     {"asset": "Tên tài sản", "value": "Giá trị", "percentage": "Tỷ lệ %"}
   ],
@@ -986,6 +1138,21 @@ FEE EXTRACTION (Look in "Thông tin phí", "Biểu phí" sections):
 2. "Phí mua lại" / "Phí bán" / "Phí rút vốn" → redemption_fee
 3. "Phí quản lý" / "Phí quản lý thường niên" → management_fee
 4. "Phí chuyển đổi" → switching_fee
+5. "TER" / "Tổng tỷ lệ chi phí" / "Tổng chi phí" → total_expense_ratio
+
+ADDITIONAL IMPORTANT FIELDS:
+- Auditor: "Đơn vị kiểm toán" / "Công ty kiểm toán"
+- Benchmark: "Chỉ số tham chiếu" / "Benchmark"
+- Trading frequency: "Tần suất giao dịch" / "Kỳ giao dịch" / "T+1" / "hàng ngày"
+- Cut-off time: "Giờ chốt lệnh" / "Thời điểm chốt lệnh"
+- NAV calculation/publication: "Tần suất tính NAV" / "Công bố NAV"
+- Settlement: "Chu kỳ thanh toán" / "T+1" / "T+2"
+- License/regulator: "Số giấy phép" / "Quyết định" / "UBCKNN"
+- Valuation: "Định giá" / "Phương pháp định giá" / "Nguồn giá"
+- Distribution: "Đại lý phân phối" / "Kênh phân phối" / "Điểm giao dịch"
+- Restrictions/limits: "Hạn chế đầu tư" / "Hạn mức vay" / "Đòn bẩy"
+- Expenses: "phí lưu ký" / "phí kiểm toán" / "phí giám sát" / "chi phí khác"
+- Risk factors: look for "Rủi ro" sections and extract the relevant paragraphs
 
 Extract fees EXACTLY as written (keep "5,0%", "Tối đa 1,5%/năm", "N/A", etc.)
 
@@ -1001,6 +1168,8 @@ class MistralOCRService:
         
         self.client = Mistral(api_key=api_key)
         self.model = "mistral-large-latest"
+        # Model used for the JSON extraction (chat) step
+        self.extraction_model = self.model
     
     def extract_structured_data(self, pdf_path: str) -> dict:
         try:
@@ -1082,6 +1251,22 @@ class MistralOCRService:
                     "type": "string",
                     "description": "Unique identifier/code for the fund"
                 },
+                "fund_type": {
+                    "type": "string",
+                    "description": "Fund type (open-end/closed-end/ETF)"
+                },
+                "legal_structure": {
+                    "type": "string",
+                    "description": "Legal structure of the fund"
+                },
+                "license_number": {
+                    "type": "string",
+                    "description": "License / decision number"
+                },
+                "regulator": {
+                    "type": "string",
+                    "description": "Regulatory authority"
+                },
                 "management_company": {
                     "type": "string",
                     "description": "Name of the fund management company"
@@ -1089,6 +1274,14 @@ class MistralOCRService:
                 "custodian_bank": {
                     "type": "string",
                     "description": "Name of the custodian bank"
+                },
+                "fund_supervisor": {
+                    "type": "string",
+                    "description": "Fund supervisor/representative if applicable"
+                },
+                "auditor": {
+                    "type": "string",
+                    "description": "Auditor of the fund (e.g. Big4)"
                 },
                 "inception_date": {
                     "type": "string",
@@ -1098,6 +1291,34 @@ class MistralOCRService:
                 "investment_objective": {
                     "type": "string",
                     "description": "Main investment objective of the fund"
+                },
+                "investment_strategy": {
+                    "type": "string",
+                    "description": "Investment strategy / policy"
+                },
+                "investment_style": {
+                    "type": "string",
+                    "description": "Active or passive (chủ động / thụ động)"
+                },
+                "sector_focus": {
+                    "type": "string",
+                    "description": "Sector focus or diversification statement"
+                },
+                "benchmark": {
+                    "type": "string",
+                    "description": "Benchmark / index referenced by the fund"
+                },
+                "investment_restrictions": {
+                    "type": "string",
+                    "description": "Key investment restrictions"
+                },
+                "borrowing_limit": {
+                    "type": "string",
+                    "description": "Borrowing limit"
+                },
+                "leverage_limit": {
+                    "type": "string",
+                    "description": "Leverage limit"
                 },
                 "fees": {
                     "type": "object",
@@ -1117,8 +1338,68 @@ class MistralOCRService:
                         "switching_fee": {
                             "type": "string",
                             "description": "Fee for switching between funds"
+                        },
+                        "total_expense_ratio": {
+                            "type": "string",
+                            "description": "Total Expense Ratio (TER) / Total costs if present"
+                        },
+                        "custody_fee": {
+                            "type": "string",
+                            "description": "Custody fee"
+                        },
+                        "audit_fee": {
+                            "type": "string",
+                            "description": "Audit fee"
+                        },
+                        "supervisory_fee": {
+                            "type": "string",
+                            "description": "Supervisory/custodian bank supervision fee"
+                        },
+                        "other_expenses": {
+                            "type": "string",
+                            "description": "Other expenses"
                         }
                     }
+                },
+                "risk_factors": {
+                    "type": "object",
+                    "description": "Key risk factors",
+                    "properties": {
+                        "concentration_risk": {"type": "string"},
+                        "liquidity_risk": {"type": "string"},
+                        "interest_rate_risk": {"type": "string"}
+                    }
+                },
+                "operational_details": {
+                    "type": "object",
+                    "description": "Operational/trading details",
+                    "properties": {
+                        "trading_frequency": {"type": "string"},
+                        "cut_off_time": {"type": "string"},
+                        "nav_calculation_frequency": {"type": "string"},
+                        "nav_publication": {"type": "string"},
+                        "settlement_cycle": {"type": "string"}
+                    }
+                },
+                "valuation": {
+                    "type": "object",
+                    "description": "Valuation and pricing",
+                    "properties": {
+                        "valuation_method": {"type": "string"},
+                        "pricing_source": {"type": "string"}
+                    }
+                },
+                "investor_rights": {
+                    "type": "string",
+                    "description": "Key investor rights"
+                },
+                "distribution_agent": {
+                    "type": "string",
+                    "description": "Distribution agent"
+                },
+                "sales_channels": {
+                    "type": "string",
+                    "description": "Sales channels"
                 },
                 "minimum_investment": {
                     "type": "object",
@@ -1228,8 +1509,15 @@ IMPORTANT INSTRUCTIONS:
 9. For Dividend history, look for "Lịch sử chia cổ tức", "Phân phối lợi nhuận".
 10. Pay special attention to:
    - Fee structures (management, subscription, redemption fees)
+    - Total Expense Ratio (TER) / tổng chi phí
+    - Fee breakdown (custody/audit/supervisory/other)
    - Minimum investment requirements
+    - Trading frequency and cut-off time
+    - NAV calculation/publication and settlement cycle
    - Asset allocation percentages
+    - Benchmark and investment style
+    - Legal/regulatory identifiers (license number, regulator)
+    - Valuation method and pricing source
    - Performance data
    - Risk classifications
 
@@ -1442,21 +1730,99 @@ class DocumentProcessingService:
                     return field_data['value']  # New Gemini structured format
                 return field_data  # Old flat format (Mistral or legacy data)
 
-            ExtractedFundData.objects.update_or_create(
-                document=document,
-                defaults={
+            def get_nested_value(data: dict, *path, default=None):
+                cur = data
+                for key in path:
+                    if not isinstance(cur, dict):
+                        return default
+                    cur = cur.get(key)
+                return get_value(cur) if cur is not None else default
+
+            def truncate_defaults_for_model(model_cls, defaults: dict) -> dict:
+                """Ensure values fit DB column limits (e.g., CharField max_length).
+
+                This prevents crashes when the LLM returns long paragraphs for short fields.
+                The full (untruncated) value is still preserved in Document.extracted_data.
+                """
+                sanitized = dict(defaults)
+                for field_name, field_value in sanitized.items():
+                    if not isinstance(field_value, str) or field_value is None:
+                        continue
+                    try:
+                        model_field = model_cls._meta.get_field(field_name)
+                    except Exception:
+                        continue
+
+                    max_len = getattr(model_field, 'max_length', None)
+                    if max_len and len(field_value) > max_len:
+                        logger.warning(
+                            f"Truncating {model_cls.__name__}.{field_name}: {len(field_value)} -> {max_len} chars"
+                        )
+                        sanitized[field_name] = field_value[:max_len]
+                return sanitized
+
+            fund_defaults = {
                     'fund_name': get_value(extracted_data.get('fund_name')),
                     'fund_code': get_value(extracted_data.get('fund_code')),
+                    'fund_type': get_nested_value(extracted_data, 'fund_type'),
+                    'legal_structure': get_nested_value(extracted_data, 'legal_structure'),
+                    'license_number': get_nested_value(extracted_data, 'license_number') or get_nested_value(extracted_data, 'license') or get_nested_value(extracted_data, 'license_no'),
+                    'regulator': get_nested_value(extracted_data, 'regulator'),
                     'management_company': get_value(extracted_data.get('management_company')),
                     'custodian_bank': get_value(extracted_data.get('custodian_bank')),
+                    'fund_supervisor': get_nested_value(extracted_data, 'fund_supervisor') or get_nested_value(extracted_data, 'governance', 'fund_supervisor'),
                     'management_fee': str(get_value(management_fee)) if management_fee is not None else None,
                     'subscription_fee': str(get_value(subscription_fee)) if subscription_fee is not None else None,
                     'redemption_fee': str(get_value(redemption_fee)) if redemption_fee is not None else None,
                     'switching_fee': str(get_value(switching_fee)) if switching_fee is not None else None,
+                    'total_expense_ratio': str(get_nested_value(extracted_data, 'fees', 'total_expense_ratio')) if get_nested_value(extracted_data, 'fees', 'total_expense_ratio') is not None else None,
+                    'custody_fee': str(get_nested_value(extracted_data, 'fees', 'custody_fee')) if get_nested_value(extracted_data, 'fees', 'custody_fee') is not None else None,
+                    'audit_fee': str(get_nested_value(extracted_data, 'fees', 'audit_fee')) if get_nested_value(extracted_data, 'fees', 'audit_fee') is not None else None,
+                    'supervisory_fee': str(get_nested_value(extracted_data, 'fees', 'supervisory_fee')) if get_nested_value(extracted_data, 'fees', 'supervisory_fee') is not None else None,
+                    'other_expenses': get_nested_value(extracted_data, 'fees', 'other_expenses') or get_nested_value(extracted_data, 'other_expenses'),
+
+                    'investment_objective': get_nested_value(extracted_data, 'investment_objective') or get_nested_value(extracted_data, 'objective') or get_nested_value(extracted_data, 'investment', 'objective'),
+                    'investment_strategy': get_nested_value(extracted_data, 'investment_strategy') or get_nested_value(extracted_data, 'strategy') or get_nested_value(extracted_data, 'investment', 'strategy'),
+                    'investment_style': get_nested_value(extracted_data, 'investment_style') or get_nested_value(extracted_data, 'style'),
+                    'sector_focus': get_nested_value(extracted_data, 'sector_focus') or get_nested_value(extracted_data, 'sector'),
+                    'benchmark': get_nested_value(extracted_data, 'benchmark'),
+
+                    'investment_restrictions': get_nested_value(extracted_data, 'investment_restrictions') or get_nested_value(extracted_data, 'investment', 'restrictions'),
+                    'borrowing_limit': get_nested_value(extracted_data, 'borrowing_limit') or get_nested_value(extracted_data, 'investment', 'borrowing_limit'),
+                    'leverage_limit': get_nested_value(extracted_data, 'leverage_limit') or get_nested_value(extracted_data, 'investment', 'leverage_limit'),
+
+                    'concentration_risk': get_nested_value(extracted_data, 'risk_factors', 'concentration_risk') or get_nested_value(extracted_data, 'concentration_risk'),
+                    'liquidity_risk': get_nested_value(extracted_data, 'risk_factors', 'liquidity_risk') or get_nested_value(extracted_data, 'liquidity_risk'),
+                    'interest_rate_risk': get_nested_value(extracted_data, 'risk_factors', 'interest_rate_risk') or get_nested_value(extracted_data, 'interest_rate_risk'),
+
+                    'trading_frequency': get_nested_value(extracted_data, 'operational_details', 'trading_frequency') or get_nested_value(extracted_data, 'trading_frequency'),
+                    'cut_off_time': get_nested_value(extracted_data, 'operational_details', 'cut_off_time') or get_nested_value(extracted_data, 'cut_off_time'),
+                    'nav_calculation_frequency': get_nested_value(extracted_data, 'operational_details', 'nav_calculation_frequency') or get_nested_value(extracted_data, 'nav_calculation_frequency'),
+                    'nav_publication': get_nested_value(extracted_data, 'operational_details', 'nav_publication') or get_nested_value(extracted_data, 'nav_publication'),
+                    'settlement_cycle': get_nested_value(extracted_data, 'operational_details', 'settlement_cycle') or get_nested_value(extracted_data, 'settlement_cycle'),
+
+                    'valuation_method': get_nested_value(extracted_data, 'valuation', 'valuation_method') or get_nested_value(extracted_data, 'valuation_method'),
+                    'pricing_source': get_nested_value(extracted_data, 'valuation', 'pricing_source') or get_nested_value(extracted_data, 'pricing_source'),
+
+                    'investor_rights': get_nested_value(extracted_data, 'investor_rights') or get_nested_value(extracted_data, 'investor', 'rights'),
+                    'distribution_agent': get_nested_value(extracted_data, 'distribution_agent') or get_nested_value(extracted_data, 'distribution', 'agent'),
+                    'sales_channels': get_nested_value(extracted_data, 'sales_channels') or get_nested_value(extracted_data, 'distribution', 'sales_channels'),
+
+                    'auditor': get_nested_value(extracted_data, 'governance', 'auditor') or get_nested_value(extracted_data, 'auditor'),
+
+                    'asset_allocation': extracted_data.get('asset_allocation') if isinstance(extracted_data.get('asset_allocation'), dict) else {},
+                    'minimum_investment': extracted_data.get('minimum_investment') if isinstance(extracted_data.get('minimum_investment'), dict) else {},
                     'portfolio': portfolio_value,
                     'nav_history': nav_history_value,
                     'dividend_history': dividend_history_value,
-                }
+
+            }
+
+            fund_defaults = truncate_defaults_for_model(ExtractedFundData, fund_defaults)
+
+            ExtractedFundData.objects.update_or_create(
+                document=document,
+                defaults=fund_defaults,
             )
 
             document.status = 'completed'
@@ -1878,3 +2244,5 @@ QUY TẮC:
             logger.error(f"Content extraction failed: {e}")
             # Trả về chuỗi rỗng thay vì crash để luồng chính xử lý tiếp
             return ""
+        
+    
