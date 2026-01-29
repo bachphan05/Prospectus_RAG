@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../services/api';
 import ChatPanel from './ChatPanel';
 import {
@@ -8,6 +8,7 @@ import {
   CommentInput,
   StatsBar
 } from './dashboard/index';
+import { PdfNavigationContext } from './dashboard/PdfNavigationContext';
 
 /**
  * Dashboard Component - Professional Design with Tailwind CSS
@@ -33,10 +34,75 @@ function Dashboard({ refreshTrigger }) {
   const [showChatPanel, setShowChatPanel] = useState(false);
   const [chatDocument, setChatDocument] = useState(null);
 
+  const [pageZoom, setPageZoom] = useState(0.4);
+  const pageScrollRef = useRef(null);
+
   useEffect(() => {
     loadDocuments();
     loadStats();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    if (selectedPage) {
+      setPageZoom(0.8);
+    }
+  }, [selectedPage]);
+
+  useEffect(() => {
+    if (!selectedPage) return;
+    const el = pageScrollRef.current;
+    if (!el) return;
+
+    const onWheel = (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+
+      const delta = e.deltaY;
+      const direction = delta > 0 ? -1 : 1;
+      const step = 0.1;
+
+      setPageZoom((prev) => {
+        const next = prev + direction * step;
+        return Math.min(3, Math.max(0.5, Number(next.toFixed(2))));
+      });
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [selectedPage]);
+
+  const openPageByNumber = useMemo(() => {
+    return (rawPageNumber) => {
+      if (!selectedDoc) return;
+      const rawPageNum = Number(rawPageNumber);
+      if (!Number.isFinite(rawPageNum) || rawPageNum <= 0) return;
+
+      // Get the page map from extracted_data (maps optimized index -> raw page number)
+      const pageMap = selectedDoc.extracted_data?._optimized_page_map;
+
+      // Find optimized page number by looking up raw page in the map
+      let optimizedPageNum = null;
+      if (Array.isArray(pageMap)) {
+        const idx = pageMap.indexOf(rawPageNum);
+        if (idx !== -1) {
+          optimizedPageNum = idx + 1; // Convert 0-based index to 1-based page number
+        }
+      }
+
+      // Try to find the page in optimizedPages using the optimized page number
+      if (optimizedPageNum !== null) {
+        const page = optimizedPages?.pages?.find(p => p.page_number === optimizedPageNum);
+        if (page) {
+          // Store both raw and optimized page numbers for display/preview
+          setSelectedPage({ ...page, raw_page_number: rawPageNum });
+          return;
+        }
+      }
+
+      // Fallback: open modal with raw page number (preview endpoint will handle mapping)
+      setSelectedPage({ page_number: optimizedPageNum || rawPageNum, raw_page_number: rawPageNum, image: null });
+    };
+  }, [optimizedPages?.pages, selectedDoc]);
 
   useEffect(() => {
     const processingDocs = documents.filter(
@@ -301,6 +367,7 @@ function Dashboard({ refreshTrigger }) {
               )}
 
               {/* Content */}
+              <PdfNavigationContext.Provider value={{ openPage: openPageByNumber }}>
               <div className="flex-1 overflow-y-auto p-6">
                 {selectedDoc.status === 'completed' && selectedDoc.extracted_data ? (
                   <div className="space-y-6">
@@ -976,15 +1043,15 @@ function Dashboard({ refreshTrigger }) {
                             <div
                               key={page.page_number}
                               className="border border-gray-300 rounded-lg overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
-                              onClick={() => setSelectedPage(page)}
+                              onClick={() => setSelectedPage({ ...page, raw_page_number: page.raw_page_number || page.page_number })}
                             >
                               <img
                                 src={page.image}
-                                alt={`Page ${page.page_number}`}
+                                alt={`Page ${page.raw_page_number || page.page_number}`}
                                 className="w-full h-auto"
                               />
                               <div className="p-2 bg-gray-50 text-center">
-                                <span className="text-xs font-medium text-gray-600">Page {page.page_number} (Trang {page.page_number})</span>
+                                <span className="text-xs font-medium text-gray-600">Page {page.raw_page_number || page.page_number} (Trang {page.raw_page_number || page.page_number})</span>
                               </div>
                             </div>
                           ))}
@@ -1007,6 +1074,7 @@ function Dashboard({ refreshTrigger }) {
                   </div>
                 )}
               </div>
+              </PdfNavigationContext.Provider>
             </>
           ) : (
             <div className="flex items-center justify-center h-full p-8">
@@ -1029,7 +1097,7 @@ function Dashboard({ refreshTrigger }) {
           onClick={() => setSelectedPage(null)}
         >
           <div className="p-4 flex justify-between items-center">
-            <h3 className="text-white text-lg font-semibold">Page {selectedPage.page_number} (Trang {selectedPage.page_number})</h3>
+            <h3 className="text-white text-lg font-semibold">Page {selectedPage.raw_page_number || selectedPage.page_number} (Trang {selectedPage.raw_page_number || selectedPage.page_number})</h3>
             <button 
               onClick={() => setSelectedPage(null)}
               className="text-gray-500 hover:text-gray-700"
@@ -1041,10 +1109,10 @@ function Dashboard({ refreshTrigger }) {
           </div>
 
           {/* Image Container with Annotated Preview */}
-          <div className="relative overflow-auto flex-1 bg-gray-100 p-4 flex justify-center">
+          <div ref={pageScrollRef} className="relative overflow-auto flex-1 bg-gray-100 p-4 flex justify-center">
             <div 
               className="relative inline-block shadow-lg"
-              style={{ width: '70%' }}
+              style={{ width: `${60 * pageZoom}%` }}
               onClick={(e) => e.stopPropagation()}
             >
               {/* Loading Spinner */}
@@ -1059,8 +1127,8 @@ function Dashboard({ refreshTrigger }) {
               
               {/* Annotated Page Image with Highlights Burned In */}
               <img
-                src={api.getPreviewPageUrl(selectedDoc.id, selectedPage.page_number)}
-                alt={`Page ${selectedPage.page_number} with highlights`}
+                src={api.getPreviewPageUrl(selectedDoc.id, selectedPage.raw_page_number || selectedPage.page_number)}
+                alt={`Page ${selectedPage.raw_page_number || selectedPage.page_number} with highlights`}
                 className="w-full h-auto block"
                 onLoadStart={() => setLoadingPreview(true)}
                 onLoad={() => setLoadingPreview(false)}
@@ -1068,7 +1136,9 @@ function Dashboard({ refreshTrigger }) {
                   setLoadingPreview(false);
                   // Fallback to original image if preview generation fails
                   console.warn('Preview generation failed, falling back to original image');
-                  e.target.src = selectedPage.image;
+                  if (selectedPage.image) {
+                    e.target.src = selectedPage.image;
+                  }
                 }}
               />
             </div>

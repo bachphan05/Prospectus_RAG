@@ -363,6 +363,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
             )
         
         try:
+            # Get the page map (optimized index -> raw page number)
+            page_map = None
+            if isinstance(document.extracted_data, dict):
+                page_map = document.extracted_data.get('_optimized_page_map')
+            
             doc = fitz.open(document.optimized_file.path)
             pages = []
             
@@ -375,8 +380,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 # Convert to base64 for JSON transmission
                 img_base64 = base64.b64encode(img_bytes).decode('utf-8')
                 
+                # Get raw page number from map if available
+                raw_page_num = page_map[page_num] if isinstance(page_map, list) and page_num < len(page_map) else page_num + 1
+                
                 pages.append({
                     'page_number': page_num + 1,
+                    'raw_page_number': raw_page_num,
                     'image': f'data:image/png;base64,{img_base64}',
                     'width': pix.width,
                     'height': pix.height
@@ -401,11 +410,14 @@ class DocumentViewSet(viewsets.ModelViewSet):
         """
         Returns an image of a specific page with highlights burned in.
         GET /api/documents/{id}/preview-page/{page_num}/
+        
+        page_num is the RAW page number from the original PDF.
+        This endpoint maps it to the optimized page for rendering.
         """
         document = self.get_object()
-        page_num = int(page_num)
+        raw_page_num = int(page_num)
         
-        # 1. Gather all bboxes for this page from extracted_data
+        # 1. Gather all bboxes for this RAW page from extracted_data
         bboxes_to_draw = []
         data = document.extracted_data or {}
         
@@ -414,7 +426,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             if isinstance(obj, dict):
                 # Check if this object is a field with bbox info
                 if 'bbox' in obj and 'page' in obj:
-                    if obj['page'] == page_num:
+                    if obj['page'] == raw_page_num:
                         bboxes_to_draw.append({
                             'bbox': obj['bbox'],
                             'label': label_prefix or 'Field',
@@ -431,15 +443,30 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
         find_bboxes(data)
         
-        logger.info(f"Found {len(bboxes_to_draw)} bboxes to draw on page {page_num}")
+        logger.info(f"Found {len(bboxes_to_draw)} bboxes to draw on raw page {raw_page_num}")
 
-        # 2. Use Service to draw them
-        # Use optimized file if available, otherwise original
-        pdf_path = document.optimized_file.path if document.optimized_file else document.file.path
+        # 2. Map raw page number to optimized page number if we have an optimized file
+        page_map = data.get('_optimized_page_map') if isinstance(data, dict) else None
+        optimized_page_num = None
+        
+        if document.optimized_file and isinstance(page_map, list):
+            try:
+                idx = page_map.index(raw_page_num)
+                optimized_page_num = idx + 1  # Convert 0-based index to 1-based page
+            except ValueError:
+                optimized_page_num = None
+        
+        # Determine which PDF to use and which page number
+        if document.optimized_file and optimized_page_num is not None:
+            pdf_path = document.optimized_file.path
+            render_page_num = optimized_page_num
+        else:
+            pdf_path = document.file.path
+            render_page_num = raw_page_num
         
         from .services import GeminiOCRService
         service = GeminiOCRService()
-        image_path = service.generate_annotated_image(pdf_path, page_num, bboxes_to_draw)
+        image_path = service.generate_annotated_image(pdf_path, render_page_num, bboxes_to_draw)
         
         if not image_path or not os.path.exists(image_path):
             return Response(

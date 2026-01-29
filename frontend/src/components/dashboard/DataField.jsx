@@ -1,10 +1,14 @@
+import { useContext } from 'react';
 import { getValue, getFieldInfo, isEffectivelyNA } from './utils';
+import { PdfNavigationContext } from './PdfNavigationContext';
 
 /**
  * DataField Component - Display/Edit field with hover functionality
  * Moved outside Dashboard to prevent losing focus on input
  */
 const DataField = ({ label, field, fieldName, editable, isEditMode, editedData, hoveredField, setHoveredField, updateEditedField }) => {
+  const { openPage } = useContext(PdfNavigationContext);
+
   // Get the current value based on edit mode
   const getCurrentValue = () => {
     if (!isEditMode) return getValue(field);
@@ -30,6 +34,13 @@ const DataField = ({ label, field, fieldName, editable, isEditMode, editedData, 
   
   const handleMouseLeave = () => {
     setHoveredField(null);
+  };
+
+  const handleOpenPage = () => {
+    if (!info || isEditMode) return;
+    const pageNumber = Number(info.page);
+    if (!Number.isFinite(pageNumber) || pageNumber <= 0) return;
+    openPage(pageNumber);
   };
   
   const isHovered = hoveredField?.fieldName === fieldName;
@@ -65,6 +76,16 @@ const DataField = ({ label, field, fieldName, editable, isEditMode, editedData, 
         } ${isHovered ? 'bg-yellow-200 shadow-md' : ''}`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onClick={handleOpenPage}
+        role={info && !isEditMode ? 'button' : undefined}
+        tabIndex={info && !isEditMode ? 0 : undefined}
+        onKeyDown={(e) => {
+          if (!info || isEditMode) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleOpenPage();
+          }
+        }}
       >
         <span>{displayValue}</span>
         {info && (

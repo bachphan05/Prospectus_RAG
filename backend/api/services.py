@@ -812,6 +812,10 @@ Now extract the data from the provided document."""
         IMPORTANT: We draw in *pixel space* on top of the rendered pixmap.
         This keeps Gemini's 0-1000 "visual" coordinates aligned with what the
         user sees, and avoids PDF user-space quirks (rotation / cropbox offsets).
+        
+        BBOX FORMAT: Gemini returns [ymin, xmin, ymax, xmax] on 0-1000 scale.
+        However, models sometimes return inconsistent formats. We try to detect
+        and correct common issues.
         """
         try:
             doc = fitz.open(pdf_path)
@@ -863,6 +867,7 @@ Now extract the data from the provided document."""
                     return s
 
                 def _ocr_best_rect(target_value: str):
+                    """Find the best matching OCR box for the given text value."""
                     if not ocr_results:
                         return None
                     tv = _norm_for_match(target_value)
@@ -911,40 +916,104 @@ Now extract the data from the provided document."""
                             best = (x0, y0, x1, y1)
                             best_score = score
 
-                    # Require at least some confidence.
-                    if best and best_score >= 0.35:
+                    # Require high confidence for OCR snap to avoid wrong highlights
+                    if best and best_score >= 0.7:
                         return best
                     return None
+
+                def _normalize_bbox(bbox):
+                    """
+                    Normalize bbox coordinates handling potential format inconsistencies.
+                    Expected format: [ymin, xmin, ymax, xmax] on 0-1000 scale.
+                    
+                    Common issues:
+                    1. Model returns [xmin, ymin, xmax, ymax] instead
+                    2. Values exceed 1000 (pixel coords instead of normalized)
+                    3. Min/max swapped
+                    """
+                    if not bbox or len(bbox) != 4:
+                        return None
+                    
+                    v0, v1, v2, v3 = [int(x) for x in bbox]
+                    
+                    # Check if any value exceeds 1000 significantly (might be pixel coords)
+                    max_val = max(v0, v1, v2, v3)
+                    if max_val > 1000:
+                        # Try to normalize - assume it's based on a ~1000px dimension
+                        scale = 1000.0 / max(max_val, 1)
+                        v0 = int(v0 * scale)
+                        v1 = int(v1 * scale)
+                        v2 = int(v2 * scale)
+                        v3 = int(v3 * scale)
+                    
+                    # Clamp all values to 0-1000
+                    v0 = max(0, min(1000, v0))
+                    v1 = max(0, min(1000, v1))
+                    v2 = max(0, min(1000, v2))
+                    v3 = max(0, min(1000, v3))
+                    
+                    # Expected: [ymin, xmin, ymax, xmax]
+                    # Try to detect if format is [xmin, ymin, xmax, ymax] based on aspect ratio heuristics
+                    # For text: typically wider than tall, so (xmax-xmin) > (ymax-ymin)
+                    
+                    # Assume [ymin, xmin, ymax, xmax] format first
+                    ymin, xmin, ymax, xmax = v0, v1, v2, v3
+                    
+                    # Ensure min < max
+                    if ymin > ymax:
+                        ymin, ymax = ymax, ymin
+                    if xmin > xmax:
+                        xmin, xmax = xmax, xmin
+                    
+                    # Sanity check: box should have some area
+                    if xmax <= xmin or ymax <= ymin:
+                        return None
+                    
+                    return (ymin, xmin, ymax, xmax)
 
                 for item in bboxes or []:
                     bbox = item.get('bbox') if isinstance(item, dict) else None
                     if not bbox or len(bbox) != 4:
                         continue
 
-                    ymin, xmin, ymax, xmax = bbox
-
-                    # Clamp + convert to pixels.
-                    xmin = max(0, min(1000, int(xmin)))
-                    xmax = max(0, min(1000, int(xmax)))
-                    ymin = max(0, min(1000, int(ymin)))
-                    ymax = max(0, min(1000, int(ymax)))
-
-                    if xmax <= xmin or ymax <= ymin:
+                    normalized = _normalize_bbox(bbox)
+                    if not normalized:
                         continue
+                    
+                    ymin, xmin, ymax, xmax = normalized
 
+                    # Convert normalized 0-1000 coords to pixel coords
                     x0 = int(round((xmin / 1000.0) * w))
                     x1 = int(round((xmax / 1000.0) * w))
                     y0 = int(round((ymin / 1000.0) * h))
                     y1 = int(round((ymax / 1000.0) * h))
 
-                    # If we can OCR-locate the actual value on the rendered page,
-                    # snap the rectangle to that (much more accurate on scanned PDFs).
+                    # Try OCR snap for more accurate positioning
+                    snapped = False
                     if isinstance(item, dict):
                         val = item.get("value")
-                        if val is not None:
-                            snapped = _ocr_best_rect(str(val))
-                            if snapped:
-                                x0, y0, x1, y1 = [int(round(v)) for v in snapped]
+                        if val is not None and str(val).strip():
+                            ocr_rect = _ocr_best_rect(str(val))
+                            if ocr_rect:
+                                ox0, oy0, ox1, oy1 = [int(round(v)) for v in ocr_rect]
+                                # Only use OCR snap if it's reasonably close to original bbox
+                                # This prevents completely wrong snaps
+                                orig_center_x = (x0 + x1) / 2
+                                orig_center_y = (y0 + y1) / 2
+                                ocr_center_x = (ox0 + ox1) / 2
+                                ocr_center_y = (oy0 + oy1) / 2
+                                
+                                # Allow snap if OCR box center is within 30% of page dimension from original
+                                dist_x = abs(ocr_center_x - orig_center_x) / max(w, 1)
+                                dist_y = abs(ocr_center_y - orig_center_y) / max(h, 1)
+                                
+                                if dist_x < 0.3 and dist_y < 0.3:
+                                    x0, y0, x1, y1 = ox0, oy0, ox1, oy1
+                                    snapped = True
+                                    logger.debug(f"OCR snapped bbox for '{val[:30]}...' on page {page_number}")
+                    
+                    if not snapped:
+                        logger.debug(f"Using original bbox for page {page_number}: [{ymin}, {xmin}, {ymax}, {xmax}]")
 
                     # Semi-transparent yellow fill + stronger border.
                     draw.rectangle([x0, y0, x1, y1], fill=(255, 255, 0, 80))
