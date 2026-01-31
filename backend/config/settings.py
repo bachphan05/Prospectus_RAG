@@ -51,7 +51,7 @@ if not SECRET_KEY:
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = _get_bool_env("DJANGO_DEBUG", False)
 
-ALLOWED_HOSTS = _get_list_env("ALLOWED_HOSTS", ["localhost", "127.0.0.1"])
+ALLOWED_HOSTS = _get_list_env("ALLOWED_HOSTS", ["localhost", "127.0.0.1", "backend"])
 
 
 # Application definition
