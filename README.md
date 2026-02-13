@@ -147,6 +147,26 @@ A comprehensive enterprise-grade solution for extracting, analyzing, and queryin
 | `GET` | `/api/documents/{id}/preview-page/{page}/` | Get rendered page with bounding box overlays |
 | `GET` | `/api/documents/{id}/change_logs/` | View audit trail of edits |
 
+## RAG Evaluation & Optimization (RAGAS)
+
+To ensure the reliability of financial data retrieval, this project implements a quantitative evaluation pipeline using the **RAGAS** framework. Instead of relying on qualitative "feeling," we measure the system's performance using a test set of complex Vietnamese financial queries.
+
+### Performance Evolution
+
+We benchmarked the retrieval system before and after implementing a custom Layout-Aware OCR pipeline.
+
+| Metric | Baseline (Standard OCR) | **Optimized (Mistral OCR + Markdown)** | Improvement |
+| :--- | :---: | :---: | :---: |
+| **Context Recall** | 0.2812 | **0.9630** |  **+242%** |
+| **Context Precision** | 0.1217 | **0.6573** |  **+440%** |
+| **Faithfulness** | 0.3464 | **0.6543** |  **+89%** |
+| **Answer Relevancy** | 0.3777 | **0.2800** | *Optimization in progress* |
+
+### Key Optimization Strategies implemented:
+
+1.  **Structured Markdown Extraction**: Switched from raw text extraction to **Mistral OCR**, which preserves document structure (tables, headers). This resolved "infinite loop" hallucinations in the vector space and allowed the embedding model to correctly interpret complex fee schedules.
+2.  **Noise Reduction Pipeline**: Implemented a heuristic cleaning layer to strip repetitive headers (e.g., "ỦY BAN CHỨNG KHOÁN") and footers that were poisoning the vector search results, leading to the massive jump in **Context Precision**.
+3.  **Local Evaluation Pipeline**: Transitioned the "Judge" LLM to a local **Ollama (Qwen 2.5 / Llama 3)** instance. This bypassed API rate limits (HTTP 429) and allowed for cost-effective, intensive regression testing.
 ## Future Improvements
 
 The following roadmap outlines planned enhancements to elevate the system's capabilities:

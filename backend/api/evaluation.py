@@ -2,103 +2,75 @@ import os
 import pandas as pd
 import ast
 from datasets import Dataset
-from ragas import evaluate
+from ragas import evaluate, RunConfig
 from ragas.metrics import (
-    faithfulness,
-    answer_relevancy,
-    context_precision,
-    context_recall,
+    Faithfulness,
+    AnswerRelevancy,
+    ContextPrecision,
+    ContextRecall,
 )
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-
-# Attempt to load .env variables if running as a standalone script
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 def run_evaluation():
-    # 0. Check API Key
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ Error: GEMINI_API_KEY not found in environment variables.")
-        return
+    print("--- Setting up RAGAS with Local Qwen 2.5 Judge ---")
 
-    print("--- Setting up RAGAS with Gemini Judge ---")
-
-    # 1. Configure the "Judge" (LLM) and Embeddings
-    # RAGAS uses this LLM to read your bot's answers and grade them.
-    # We use temperature=0 for consistent grading.
-    gemini_judge = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash", 
-        google_api_key=api_key,
-        temperature=0
+    # 1. Cấu hình Judge (Dùng Qwen 2.5 thay cho Llama 3)
+    local_judge = ChatOllama(
+        model="qwen2.5:7b", # Đổi sang qwen2.5 để xử lý JSON chuẩn hơn
+        base_url="http://localhost:11434",
+        format="json",
+        temperature=0,
+        num_ctx=16384, # Tăng context window để đọc được nhiều chunk tài chính
+        timeout=300    # Tăng thời gian chờ lên 5 phút
     )
 
-    # RAGAS needs embeddings to calculate vector similarity for relevance metrics.
-    gemini_embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
-        google_api_key=api_key
+    # 2. Cấu hình Embedding local
+    local_embeddings = OllamaEmbeddings(
+        model="nomic-embed-text",
+        base_url="http://localhost:11434"
     )
 
-    # 2. Load the generated data
-    csv_path = "ragas_dataset.csv"
-    try:
-        print(f"Loading data from {csv_path}...")
-        df = pd.read_csv(csv_path)
-        
-        # CRITICAL STEP: 
-        # CSV saves lists as strings like "['text1', 'text2']". 
-        # We must convert them back to actual Python lists.
-        df['contexts'] = df['contexts'].apply(ast.literal_eval)
-        
-        # Convert to HuggingFace Dataset format required by RAGAS
-        dataset = Dataset.from_pandas(df)
-        print(f"✅ Loaded {len(dataset)} test samples.")
-        
-    except FileNotFoundError:
-        print(f"❌ Error: {csv_path} not found.")
-        print("   Please run: python manage.py generate_ragas_data <doc_id>")
-        return
-    except Exception as e:
-        print(f"❌ Error loading CSV: {e}")
-        return
-
-    # 3. Define Metrics
-    # - Faithfulness: Is the answer derived from the context? (Avoids hallucinations)
-    # - Answer Relevancy: Is the answer actually addressing the question?
-    # - Context Precision: Is the relevant chunk ranked highly?
-    # - Context Recall: Did we retrieve the correct answer from the ground truth?
+    # 3. Khởi tạo Metrics với LLM đã chọn
     metrics = [
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
+        Faithfulness(llm=local_judge),
+        AnswerRelevancy(llm=local_judge),
+        ContextPrecision(llm=local_judge),
+        ContextRecall(llm=local_judge),
     ]
 
-    # 4. Run Evaluation
-    print("\n🚀 Running RAGAS Evaluation... (This may take a minute)")
+    # 4. Load dữ liệu
+    csv_path = "ragas_dataset.csv"
+    try:
+        df = pd.read_csv(csv_path)
+        df['contexts'] = df['contexts'].apply(ast.literal_eval)
+        dataset = Dataset.from_pandas(df)
+        print(f"Loaded {len(dataset)} samples.")
+    except Exception as e:
+        print(f" Error loading CSV: {e}")
+        return
+
+  
+
+    print("\nRunning RAGAS Evaluation LOCALLY...")
+    print("Lưu ý: Đang chạy tuần tự 1-1 để tránh lỗi JSON. Sẽ mất khoảng 5-10 phút.")
+    
     try:
         results = evaluate(
             dataset=dataset,
             metrics=metrics,
-            llm=gemini_judge,
-            embeddings=gemini_embeddings
+            llm=local_judge,
+            embeddings=local_embeddings,
         )
     except Exception as e:
-        print(f"❌ Evaluation failed: {e}")
+        print(f"\n Evaluation failed: {e}")
         return
 
-    # 5. Output Results
-    print("\n--- 📊 Evaluation Results ---")
+    print("\n---  Evaluation Results (Local) ---")
     print(results)
 
-    # Save detailed results to CSV for analysis
-    output_file = "ragas_results.csv"
-    results_df = results.to_pandas()
-    results_df.to_csv(output_file, index=False)
-    print(f"\n✅ Detailed report saved to {output_file}")
+    output_file = "ragas_results_local.csv"
+    results.to_pandas().to_csv(output_file, index=False)
+    print(f"\n Detailed report saved to {output_file}")
 
 if __name__ == "__main__":
     run_evaluation()

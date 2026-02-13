@@ -9,7 +9,7 @@ from pathlib import Path
 import threading
 import unicodedata
 import io
-import google.generativeai as genai
+import requests
 from mistralai import Mistral
 from django.conf import settings
 from django.utils import timezone
@@ -24,6 +24,13 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 import PIL.Image
 import PIL.ImageDraw
 logger = logging.getLogger(__name__)
+
+
+def _lazy_import_genai():
+    """Lazy import google.generativeai to avoid deprecation warnings unless actually needed."""
+    import google.generativeai as genai
+    return genai
+
 
 try:
     # Prefer unidecode when available; it handles Vietnamese well and is fast.
@@ -269,6 +276,7 @@ class GeminiOCRService:
     """Service for OCR using Gemini 2.5 Flash Lite API"""
     
     def __init__(self):
+        genai = _lazy_import_genai()
         # Configure Gemini API
         api_key = os.getenv('GEMINI_API_KEY')
         if not api_key:
@@ -276,6 +284,7 @@ class GeminiOCRService:
         
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        self._genai = genai
     
     def extract_structured_data(self, pdf_path: str) -> dict:
         """
@@ -294,7 +303,7 @@ class GeminiOCRService:
             import time
             while uploaded_file.state.name == "PROCESSING":
                 time.sleep(2)
-                uploaded_file = genai.get_file(uploaded_file.name)
+                uploaded_file = self._genai.get_file(uploaded_file.name)
 
             if uploaded_file.state.name == "FAILED":
                 raise ValueError("File processing failed on Gemini API")
@@ -303,7 +312,7 @@ class GeminiOCRService:
             
             try:
                 # Use temperature=0 and top_p=0 for maximum deterministic, consistent results
-                generation_config = genai.types.GenerationConfig(
+                generation_config = self._genai.types.GenerationConfig(
                     temperature=0,
                     top_p=0.1,
                     top_k=1,
@@ -321,7 +330,7 @@ class GeminiOCRService:
 
             # Cleanup uploaded file
             try:
-                genai.delete_file(uploaded_file.name)
+                self._genai.delete_file(uploaded_file.name)
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup uploaded file: {cleanup_error}")
 
@@ -2100,18 +2109,40 @@ class RAGService:
     """
 
     def __init__(self):
-        api_key = os.getenv('GEMINI_API_KEY')
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not set")
-        
-        genai.configure(api_key=api_key)
         mistral_key = os.getenv('MISTRAL_API_KEY')
         if not mistral_key:
             raise ValueError("MISTRAL_API_KEY environment variable is not set")
 
         self.mistral_client = Mistral(api_key=mistral_key)
         self.embedding_model = "mistral-embed-2312"
-        self.chat_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        
+        # Chat provider configuration: ollama (qwen2.5), gemini, or mistral
+        self.chat_provider = os.getenv('RAG_CHAT_PROVIDER', 'ollama').strip().lower()
+        self.ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').strip()
+        self.ollama_model = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b').strip()
+        self.mistral_chat_model = os.getenv('MISTRAL_CHAT_MODEL', 'mistral-small-latest').strip()
+        
+        logger.info(f"RAGService initialized with chat_provider={self.chat_provider}")
+        
+        # Initialize chat model based on provider
+        self._genai = None
+        self.chat_model = None
+        
+        if self.chat_provider == 'gemini':
+            genai = _lazy_import_genai()
+            api_key = os.getenv('GEMINI_API_KEY')
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY not set (required when RAG_CHAT_PROVIDER=gemini)")
+            genai.configure(api_key=api_key)
+            self._genai = genai
+            self.chat_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            logger.info("Using Gemini for RAG chat")
+        elif self.chat_provider == 'ollama':
+            logger.info(f"Using Ollama ({self.ollama_model}) at {self.ollama_base_url} for RAG chat")
+        elif self.chat_provider == 'mistral':
+            logger.info(f"Using Mistral ({self.mistral_chat_model}) for RAG chat")
+        else:
+            raise ValueError(f"Invalid RAG_CHAT_PROVIDER: {self.chat_provider}. Use 'ollama', 'gemini', or 'mistral'")
 
     def _clean_text_for_rag(self, text: str) -> str:
         """Removes repetitive headers/footers and fixes extraction glitches."""
@@ -2546,31 +2577,87 @@ NGUỒN 2: TRÍCH ĐOẠN VĂN BẢN CHI TIẾT (dùng cho câu hỏi giải th�
 QUY TẮC:
 1. Nếu người dùng hỏi về Phí hoặc Số liệu cụ thể, hãy kiểm tra NGUỒN 1 trước.
 2. Nếu NGUỒN 1 không có / không đủ, hãy dùng NGUỒN 2.
-3. Trả lời bằng tiếng Việt, ngắn gọn, chuyên nghiệp.
-4. Nếu không tìm thấy thông tin từ cả hai nguồn, hãy nói: "Tôi không tìm thấy thông tin đó trong tài liệu."
+3. Trả lời bằng tiếng Việt, chuyên nghiệp, đầy đủ ý. Nếu thông tin nằm trong bảng, hãy trình bày lại dưới dạng danh sách hoặc bảng để người dùng dễ hiểu. 
+Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụng cho đối tượng nào).
+4. Cuối mỗi câu trả lời, hãy ghi rõ thông tin này được lấy từ trang mấy (ví dụ: Nguồn: Trang 5)
+5. Nếu không tìm thấy thông tin từ cả hai nguồn, hãy nói: "Tôi không tìm thấy thông tin đó trong tài liệu."
 """.strip()
             
-            # Prepare chat history for Gemini
-            chat_history = []
-            if history:
-                for h in history:
-                    role = "user" if h.get('sender') == 'user' else "model"
-                    chat_history.append({"role": role, "parts": [h.get('text', '')]})
+            # Generate response based on provider
+            response_text = ""
+            
+            if self.chat_provider == 'ollama':
+                # Use Ollama API (OpenAI-compatible)
+                messages = [{"role": "system", "content": system_prompt}]
+                if history:
+                    for h in history:
+                        role = "user" if h.get('sender') == 'user' else "assistant"
+                        messages.append({"role": role, "content": h.get('text', '')})
+                messages.append({"role": "user", "content": f"CÂU HỎI: {user_query}"})
+                
+                try:
+                    response = requests.post(
+                        f"{self.ollama_base_url}/api/chat",
+                        json={
+                            "model": self.ollama_model,
+                            "messages": messages,
+                            "stream": False,
+                            "options": {"temperature": 0}
+                        },
+                        timeout=60
+                    )
+                    response.raise_for_status()
+                    response_text = response.json().get('message', {}).get('content', '')
+                except Exception as ollama_error:
+                    logger.error(f"Ollama API error: {ollama_error}")
+                    raise
+                    
+            elif self.chat_provider == 'mistral':
+                # Use Mistral API
+                messages = [{"role": "system", "content": system_prompt}]
+                if history:
+                    for h in history:
+                        role = "user" if h.get('sender') == 'user' else "assistant"
+                        messages.append({"role": role, "content": h.get('text', '')})
+                messages.append({"role": "user", "content": f"CÂU HỎI: {user_query}"})
+                
+                chat_response = self.mistral_client.chat.complete(
+                    model=self.mistral_chat_model,
+                    messages=messages,
+                    temperature=0
+                )
+                response_text = chat_response.choices[0].message.content
+                
+            else:  # gemini
+                # Prepare chat history for Gemini
+                chat_history = []
+                if history:
+                    for h in history:
+                        role = "user" if h.get('sender') == 'user' else "model"
+                        chat_history.append({"role": role, "parts": [h.get('text', '')]})
 
-            # Start chat session
-            chat = self.chat_model.start_chat(history=chat_history)
-            response = chat.send_message(f"{system_prompt}\n\nCÂU HỎI: {user_query}")
-            response_text = response.text 
+                # Start chat session
+                chat = self.chat_model.start_chat(history=chat_history)
+                response = chat.send_message(f"{system_prompt}\n\nCÂU HỎI: {user_query}")
+                response_text = response.text
+            
             if return_source:
                 return {
                     "text": response_text,
                     "contexts": [c.content for c in retrieved_chunks],
-                    "structured_data_used": structured_info # Optional: capture this too
+                    "structured_data_used": structured_info
                 }
-            return response.text
+            return response_text
 
         except Exception as e:
             logger.error(f"RAG Chat Error: {str(e)}")
+            if return_source:
+                return {
+                    "text": "Xin lỗi, tôi gặp sự cố khi xử lý câu hỏi.",
+                    "contexts": [],
+                    "structured_data_used": "",
+                    "error": str(e)
+                }
             return "Xin lỗi, tôi gặp sự cố khi xử lý câu hỏi."
 
     def _extract_content_for_rag(self, document) -> str:
