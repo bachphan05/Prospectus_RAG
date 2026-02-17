@@ -39,7 +39,8 @@ def run_evaluation():
     ]
 
     # 4. Load dữ liệu
-    csv_path = "ragas_dataset.csv"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(os.path.dirname(script_dir), "ragas_dataset.csv")
     try:
         df = pd.read_csv(csv_path)
         df['contexts'] = df['contexts'].apply(ast.literal_eval)
@@ -52,14 +53,21 @@ def run_evaluation():
   
 
     print("\nRunning RAGAS Evaluation LOCALLY...")
-    print("Lưu ý: Đang chạy tuần tự 1-1 để tránh lỗi JSON. Sẽ mất khoảng 5-10 phút.")
+    print("Lưu ý: Đang chạy tuần tự để tránh timeout. Sẽ mất khoảng 15-30 phút.")
     
+    run_config = RunConfig(
+        max_workers=1,       # Sequential: 1 job at a time so Ollama isn't overwhelmed
+        max_wait=600,        # 10 min timeout per job
+        max_retries=3,       # Retry failed jobs up to 3 times
+    )
+
     try:
         results = evaluate(
             dataset=dataset,
             metrics=metrics,
             llm=local_judge,
             embeddings=local_embeddings,
+            run_config=run_config,
         )
     except Exception as e:
         print(f"\n Evaluation failed: {e}")

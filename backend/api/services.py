@@ -23,6 +23,8 @@ from pgvector.django import CosineDistance
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 import PIL.Image
 import PIL.ImageDraw
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db.models import F
 logger = logging.getLogger(__name__)
 
 
@@ -296,7 +298,7 @@ class GeminiOCRService:
             file_size = os.path.getsize(pdf_path)
             logger.info(f"Uploading PDF to Gemini: {pdf_path} (Size: {file_size} bytes)")
             
-            uploaded_file = genai.upload_file(pdf_path, mime_type="application/pdf")
+            uploaded_file = self._genai.upload_file(pdf_path, mime_type="application/pdf")
             logger.info(f"Uploaded file URI: {uploaded_file.uri}")
 
             # Wait for processing to finish before generating content
@@ -2393,6 +2395,18 @@ class RAGService:
             total_chunks = document.chunks.count()
             logger.info(f"Successfully saved {total_chunks} vector chunks total.")
 
+            # Populate search_vector for keyword (full-text) search
+            try:
+                from django.db import connection
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE api_documentchunk SET search_vector = to_tsvector('simple', content) WHERE document_id = %s",
+                        [document_id],
+                    )
+                logger.info(f"Populated search_vector for {total_chunks} chunks (document {document_id}).")
+            except Exception as e:
+                logger.warning(f"Failed to populate search_vector for document {document_id}: {e}")
+
             try:
                 Document.objects.filter(id=document_id).update(
                     rag_status='completed',
@@ -2536,31 +2550,16 @@ THÔNG TIN CƠ BẢN ĐÃ ĐƯỢC TRÍCH XUẤT (từ Document.extracted_data):
 - Cơ cấu phân bổ tài sản: {json.dumps(asset_allocation or {}, ensure_ascii=False)}
 """.strip()
 
-            # 2. Vector Search (Semantic Retrieval) cho câu hỏi giải thích / chiến lược / rủi ro...
-            rag_context_str = ""
+            # 2. Hybrid Search (Vector + Keyword via RRF) cho câu hỏi giải thích / chiến lược / rủi ro...
             retrieved_chunks = []
+            rag_context = ""
             try:
-                query_embedding = self.mistral_client.embeddings.create(
-                    model=self.embedding_model,
-                    inputs=[user_query],
-                ).data[0].embedding
-                retrieved_chunks = DocumentChunk.objects.filter(document_id=document_id) \
-                    .annotate(distance=CosineDistance('embedding', query_embedding)) \
-                    .order_by('distance')[:25]
-                # Create the string for the LLM
-                rag_context_str = "\n\n---\n\n".join(
-                    [f"=== PAGE {c.page_number} ===\n{c.content}" for c in retrieved_chunks]
-                )
-                relevant_chunks = DocumentChunk.objects.filter(document_id=document_id) \
-                    .annotate(distance=CosineDistance('embedding', query_embedding)) \
-                    .order_by('distance')[:25]
-
+                retrieved_chunks = self.hybrid_search(document_id, user_query, top_k=25)
                 rag_context = "\n\n---\n\n".join(
-                    [f"=== PAGE {c.page_number} ===\n{c.content}" for c in relevant_chunks]
+                    [f"=== PAGE {c.page_number} ===\n{c.content}" for c in retrieved_chunks]
                 )
             except Exception as e:
                 logger.warning(f"RAG retrieval failed for document {document_id}: {str(e)}")
-                rag_context = ""
 
             # 3. Tổng hợp Prompt: dùng cả JSON + Vector
             system_prompt = f"""
@@ -2580,7 +2579,8 @@ QUY TẮC:
 3. Trả lời bằng tiếng Việt, chuyên nghiệp, đầy đủ ý. Nếu thông tin nằm trong bảng, hãy trình bày lại dưới dạng danh sách hoặc bảng để người dùng dễ hiểu. 
 Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụng cho đối tượng nào).
 4. Cuối mỗi câu trả lời, hãy ghi rõ thông tin này được lấy từ trang mấy (ví dụ: Nguồn: Trang 5)
-5. Nếu không tìm thấy thông tin từ cả hai nguồn, hãy nói: "Tôi không tìm thấy thông tin đó trong tài liệu."
+5. Nếu thông tin tổng hợp từ nhiều trang: [Trang X, Y].
+6. Nếu không tìm thấy thông tin từ cả hai nguồn, hãy nói: "Tôi không tìm thấy thông tin đó trong tài liệu."
 """.strip()
             
             # Generate response based on provider
@@ -2839,4 +2839,49 @@ Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụn
             # Trả về chuỗi rỗng thay vì crash để luồng chính xử lý tiếp
             return ""
         
-    
+    def hybrid_search(self, document_id: int, query_text: str, top_k=10, k_fusion=60):
+        """
+    Performs Hybrid Search (Vector + Keyword) using Reciprocal Rank Fusion (RRF).
+    """
+        # 1. Semantic Search: Captures meaning
+        query_embedding = self.mistral_client.embeddings.create(
+            model=self.embedding_model,
+            inputs=[query_text],
+        ).data[0].embedding
+        # Get top 50 semantic results (fetch more than top_k to allow fusion to work)
+        semantic_results = DocumentChunk.objects.filter(document_id=document_id) \
+        .annotate(distance=CosineDistance('embedding', query_embedding)) \
+        .order_by('distance')[:50]
+        # 2. Keyword Search (BM25-like) - Captures "Specific Terms" (Names, IDs, Numbers)
+        # Using the pre-computed GIN index makes this extremely fast.
+        search_query = SearchQuery(query_text, config='simple')
+        keyword_results = DocumentChunk.objects.filter(
+        document_id=document_id, 
+        search_vector=search_query
+        ).annotate(
+        rank=SearchRank(F('search_vector'), search_query)
+        ).order_by('-rank')[:50]
+        # 3. Reciprocal Rank Fusion (RRF) Algorithm
+        # Score = 1 / (k + rank)
+        fused_scores = {}
+
+        # Process Semantic Ranks
+        for rank, doc in enumerate(semantic_results):
+            if doc.id not in fused_scores:
+                fused_scores[doc.id] = 0
+            fused_scores[doc.id] += 1 / (k_fusion + rank + 1)
+
+        # Process Keyword Ranks
+        for rank, doc in enumerate(keyword_results):
+            if doc.id not in fused_scores:
+                fused_scores[doc.id] = 0
+            fused_scores[doc.id] += 1 / (k_fusion + rank + 1)
+        # 4. Sort by Final RRF Score
+        sorted_doc_ids = sorted(fused_scores, key=fused_scores.get, reverse=True)[:top_k]
+        
+        # 5. Retrieve Final Objects (Preserve Order)
+        # Django queries don't preserve list order by default, so we sort in Python
+        final_chunks = list(DocumentChunk.objects.filter(id__in=sorted_doc_ids))
+        final_chunks.sort(key=lambda chunk: fused_scores[chunk.id], reverse=True)
+        
+        return final_chunks

@@ -15,134 +15,91 @@ class Command(BaseCommand):
         rag_service = RAGService()
 
         # 1. Define your Test Questions (Ground Truth is optional but recommended)
-        test_cases = test_cases = [
+        test_cases = [
+    # --- NHÓM 1: KIỂM THỬ KEYWORD (TÌM CON SỐ & MÃ ĐỊNH DANH) ---
     {
-        "question": "Tên đầy đủ tiếng Việt và tiếng Anh của quỹ TCSME là gì?",
-        "ground_truth": "Tên tiếng Việt: Quỹ Đầu tư Cổ phiếu Doanh nghiệp vừa và nhỏ Techcom. Tên tiếng Anh: Techcom Small and Medium Enterprise Equity Fund."
+        "question": "Giấy chứng nhận đăng ký chào bán số 250/GCN-UBCK được cấp vào ngày nào?",
+        "ground_truth": "Giấy chứng nhận đăng ký chào bán chứng chỉ quỹ số 250/GCN-UBCK do Chủ tịch UBCKNN cấp ngày 23/8/2022."
     },
     {
-        "question": "Mục tiêu đầu tư chính của Quỹ TCSME được quy định như thế nào trong Bản cáo bạch?",
-        "ground_truth": "Mục tiêu đầu tư là mang lại lợi nhuận dài hạn thông qua tăng trưởng vốn gốc và thu nhập trên cơ sở đánh giá, lựa chọn tài sản tốt, phân bổ danh mục hợp lý và tối thiểu hóa rủi ro."
+        "question": "Địa chỉ văn phòng của TechcomCapital tại Tầng 28, Tòa C5, số 119 Trần Duy Hưng là ở quận nào?",
+        "ground_truth": "Địa chỉ tại Tầng 28, Tòa C5, số 119 Trần Duy Hưng, phường Trung Hòa, Quận Cầu Giấy, Hà Nội."
     },
     {
-        "question": "Chiến lược đầu tư của Quỹ tập trung vào nhóm cổ phiếu nào?",
-        "ground_truth": "Chiến lược đầu tư chính là đầu tư năng động vào cổ phiếu của các Công ty hàng đầu trong rổ cổ phiếu VNMID và VNSML."
+        "question": "Thông tin về Ngân hàng lưu ký có số giấy chứng nhận đăng ký hoạt động là 510/QĐ-ĐKHĐLK như thế nào?",
+        "ground_truth": "Là Ngân hàng TMCP Đầu tư và Phát triển Việt Nam - Chi nhánh Hà Thành, có Giấy chứng nhận đăng ký hoạt động lưu ký chứng khoán số 510/QĐ-ĐKHĐLK ngày 01/08/2006 do UBCKNN cấp."
     },
     {
-        "question": "Vốn điều lệ ban đầu và mệnh giá một chứng chỉ quỹ trong đợt phát hành lần đầu là bao nhiêu?",
-        "ground_truth": "Vốn điều lệ huy động lần đầu là 50.000.000.000 VNĐ. Mệnh giá là 10.000 VNĐ/chứng chỉ quỹ."
+        "question": "Mức phí quản lý quỹ là 2,0%/năm áp dụng cho đối tượng nào?",
+        "ground_truth": "Mức phí 2,0% NAV/năm là mức giá dịch vụ Quản Lý tối đa được quy định trong Bản cáo bạch (mức hiện tại áp dụng có thể thấp hơn tùy thông báo)."
     },
     {
-        "question": "Mức phí dịch vụ quản lý quỹ (Management Fee) tối đa là bao nhiêu phần trăm một năm?",
-        "ground_truth": "Giá dịch vụ Quản Lý tối đa là 1,2% NAV/năm."
+        "question": "Số điện thoại liên hệ của Công ty Cổ phần Quản lý quỹ Kỹ thương (TechcomCapital) là số nào?",
+        "ground_truth": "Số điện thoại: (84-24) 39446368."
     },
     {
-        "question": "Biểu phí dịch vụ mua lại (Redemption Fee) áp dụng cho nhà đầu tư nắm giữ dưới 6 tháng và từ 12 tháng trở lên là bao nhiêu?",
-        "ground_truth": "0 đến dưới 6 tháng: 1,00%; Từ trên 12 tháng trở lên: 0,00%."
+        "question": "Mã số thuế hoặc số đăng ký kinh doanh của TechcomCapital được ghi nhận như thế nào?",
+        "ground_truth": "Giấy phép thành lập và hoạt động số 10/GP-UBCK ngày 03/07/2006 do Chủ tịch Ủy ban Chứng khoán Nhà nước cấp."
+    },
+
+    # --- NHÓM 2: KIỂM THỬ SEMANTIC (TÌM THEO Ý NGHĨA/NGỮ CẢNH) ---
+    {
+        "question": "Nếu thị trường chứng khoán sụt giảm mạnh, quỹ có những biện pháp gì để bảo vệ tài sản của tôi?",
+        "ground_truth": "Quỹ thực hiện quản trị rủi ro bằng cách đa dạng hóa danh mục đầu tư, tuân thủ các hạn mức đầu tư an toàn và thực hiện các biện pháp phòng ngừa rủi ro thị trường theo quy định pháp luật."
     },
     {
-        "question": "Phí dịch vụ chuyển đổi (Switching Fee) giữa các quỹ mở của TechcomCapital được tính như thế nào?",
-        "ground_truth": "Giá dịch vụ Chuyển Đổi Quỹ tối đa 3%. Biểu phí hiện tại: 0 đến dưới 6 tháng: 1,00%; trên 12 tháng: 0,00%."
+        "question": "Tôi có thể rút tiền ra khỏi quỹ bằng cách nào và mất bao lâu?",
+        "ground_truth": "Nhà đầu tư thực hiện bằng cách đặt Lệnh Bán chứng chỉ quỹ. Tiền sẽ được thanh toán trong vòng 05 ngày làm việc kể từ Ngày giao dịch chứng chỉ quỹ."
     },
     {
-        "question": "Nhà đầu tư phải trả bao nhiêu phí cho một lần chuyển nhượng chứng chỉ quỹ (Transfer Fee)?",
-        "ground_truth": "Giá dịch vụ Chuyển Nhượng là 300.000 đồng cho mỗi giao dịch."
+        "question": "Quỹ này ưu tiên đầu tư vào các loại hình doanh nghiệp như thế nào?",
+        "ground_truth": "Quỹ tập trung đầu tư năng động vào cổ phiếu của các Công ty hàng đầu trong rổ cổ phiếu VNMID (vốn hóa vừa) và VNSML (vốn hóa nhỏ) trên thị trường chứng khoán Việt Nam."
     },
     {
-        "question": "Phí dịch vụ giám sát và phí lưu ký mà Quỹ phải trả cho Ngân hàng giám sát là bao nhiêu?",
-        "ground_truth": "Phí giám sát: 0,02% NAV/năm (tối thiểu 5.000.000 đồng/tháng). Phí lưu ký: 0,06% NAV/năm (tối thiểu 20.000.000 đồng/tháng)."
+        "question": "Ai là người chịu trách nhiệm giám sát việc chi tiêu và sử dụng tiền của quỹ?",
+        "ground_truth": "Ngân hàng giám sát (BIDV - Chi nhánh Hà Thành) có trách nhiệm giám sát hoạt động của Công ty quản lý quỹ nhằm đảm bảo tài sản của quỹ được quản lý đúng quy định."
     },
     {
-        "question": "Phí dịch vụ phát hành (Subscription Fee) hiện tại của Quỹ là bao nhiêu?",
-        "ground_truth": "Mức giá dịch vụ phát hành của Quỹ là 0%."
+        "question": "Làm thế nào để tôi biết được giá trị tài sản của mình mỗi ngày?",
+        "ground_truth": "Nhà đầu tư có thể theo dõi Giá trị tài sản ròng (NAV) được công bố định kỳ tại mỗi Ngày Giao Dịch trên website của Công ty quản lý quỹ và các Đại lý phân phối."
+    },
+
+    # --- NHÓM 3: KIỂM THỬ HYBRID (SỨC MẠNH TỔNG HỢP) ---
+    {
+        "question": "Quy định về thời gian Cut-off time để thực hiện lệnh giao dịch trong ngày là khi nào?",
+        "ground_truth": "Thời điểm đóng sổ lệnh (Cut-off time) là 14h45 ngày T-1 (trước Ngày giao dịch)."
     },
     {
-        "question": "Phí dịch vụ quản trị quỹ (Fund Administration Fee) được tính theo tỷ lệ nào và mức tối thiểu là bao nhiêu?",
-        "ground_truth": "Giá dịch vụ Quản trị quỹ là 0,03% NAV/năm, tối thiểu 15.000.000 đồng/tháng (chưa VAT)."
+        "question": "Các rủi ro liên quan đến biến động lãi suất ảnh hưởng như thế nào đến lợi nhuận của Quỹ TCSME?",
+        "ground_truth": "Rủi ro lãi suất ảnh hưởng đến giá trị các công cụ nợ và tiền gửi. Khi lãi suất thị trường tăng, giá trị các công cụ nợ thường giảm, làm ảnh hưởng đến NAV của quỹ."
     },
     {
-        "question": "Thời điểm đóng sổ lệnh (Cut-off time) đối với lệnh mua và lệnh bán chứng chỉ quỹ là khi nào?",
-        "ground_truth": "Thời điểm đóng sổ lệnh là 14h45 ngày T-1 (trước ngày giao dịch)."
+        "question": "Hạn mức đầu tư vào cổ phiếu chưa niêm yết của quỹ được quy định tối đa là bao nhiêu phần trăm?",
+        "ground_truth": "Quỹ không được đầu tư quá 20% tổng giá trị tài sản ròng vào các chứng khoán chưa niêm yết, trừ công cụ nợ Chính phủ."
     },
     {
-        "question": "Giá trị đặt lệnh mua tối thiểu (Minimum Subscription) đối với nhà đầu tư là bao nhiêu?",
-        "ground_truth": "Mức đầu tư tối thiểu là 10.000 VNĐ."
+        "question": "Trong trường hợp xảy ra tranh chấp, cơ quan nào sẽ đứng ra giải quyết theo quy định của Bản cáo bạch?",
+        "ground_truth": "Tranh chấp sẽ được ưu tiên giải quyết thông qua thương lượng, hòa giải. Nếu không thành, tranh chấp sẽ được đưa ra giải quyết tại Tòa án có thẩm quyền tại Việt Nam."
     },
     {
-        "question": "Số lượng chứng chỉ quỹ tối thiểu phải bán trong một lệnh bán (Minimum Redemption) là bao nhiêu?",
-        "ground_truth": "Lệnh Bán tối thiểu là 10 (mười) Đơn Vị Quỹ."
+        "question": "TCSME có được phép vay nợ để đầu tư không và hạn mức vay là bao nhiêu?",
+        "ground_truth": "Quỹ chỉ được vay ngắn hạn để trang trải các chi phí cần thiết hoặc thanh toán lệnh mua lại CCQ, hạn mức không quá 5% giá trị tài sản ròng và thời gian vay tối đa 30 ngày."
     },
     {
-        "question": "Trong trường hợp lệnh bán bị thực hiện một phần, nhà đầu tư cần làm gì nếu số lượng CCQ còn lại nhỏ hơn số lượng tối thiểu?",
-        "ground_truth": "Nhà Đầu tư cần đặt bán toàn bộ để giảm số Đơn vị Quỹ nắm giữ về 0."
+        "question": "Điều kiện để trở thành thành viên của Ban đại diện Quỹ là gì?",
+        "ground_truth": "Thành viên Ban đại diện Quỹ phải đáp ứng các tiêu chuẩn về đạo đức, chuyên môn tài chính/kế toán và không thuộc các trường hợp bị cấm theo quy định của Luật Chứng khoán và Điều lệ Quỹ."
     },
     {
-        "question": "Quỹ xác định Giá trị tài sản ròng (NAV) với tần suất như thế nào và công bố ở đâu?",
-        "ground_truth": "NAV được xác định tại mỗi Ngày Giao Dịch (thứ Hai đến thứ Sáu) và công bố vào ngày làm việc tiếp theo."
+        "question": "Phí chuyển đổi từ quỹ TCSME sang các quỹ khác của TechcomCapital được tính như thế nào?",
+        "ground_truth": "Mức phí chuyển đổi tối đa là 3% giá trị giao dịch. Biểu phí hiện tại được phân loại theo thời gian nắm giữ, miễn phí nếu nắm giữ trên 12 tháng."
     },
     {
-        "question": "Thời gian thanh toán tiền bán chứng chỉ quỹ cho nhà đầu tư là trong vòng bao lâu?",
-        "ground_truth": "Trong thời hạn 5 ngày làm việc sau ngày giao dịch Chứng chỉ quỹ."
+        "question": "Giải thích quy trình xử lý nếu xảy ra sai sót trong việc định giá NAV vượt mức sai số cho phép?",
+        "ground_truth": "Công ty quản lý quỹ phải bồi thường thiệt hại cho nhà đầu tư và Quỹ nếu sai sót vượt mức 0,75% NAV (đối với quỹ cổ phiếu) theo quy định của pháp luật."
     },
     {
-        "question": "Quỹ TCSME không được đầu tư quá bao nhiêu phần trăm tổng giá trị tài sản vào chứng khoán của một tổ chức phát hành?",
-        "ground_truth": "Không được đầu tư quá 10% tổng giá trị chứng khoán đang lưu hành của tổ chức đó (trừ công cụ nợ Chính phủ) và không quá 20% tổng tài sản quỹ vào một tổ chức."
-    },
-    {
-        "question": "Tổng giá trị các hạng mục đầu tư lớn (chiếm từ 5% tài sản quỹ trở lên) không được vượt quá tỷ lệ nào?",
-        "ground_truth": "Không được vượt quá 40% tổng giá trị tài sản của quỹ."
-    },
-    {
-        "question": "Quỹ có được phép đầu tư vào chứng chỉ quỹ của chính mình hoặc đầu tư trực tiếp vào bất động sản không?",
-        "ground_truth": "Không được đầu tư vào chứng chỉ quỹ của chính quỹ đó. Không được đầu tư trực tiếp vào bất động sản, đá quý, kim loại quý hiếm."
-    },
-    {
-        "question": "Giới hạn đầu tư vào nhóm công ty có quan hệ sở hữu (công ty mẹ, công ty con) là bao nhiêu phần trăm tổng giá trị tài sản quỹ?",
-        "ground_truth": "Không được đầu tư quá 30% tổng giá trị tài sản của quỹ vào các công ty trong cùng một nhóm công ty có quan hệ sở hữu."
-    },
-    {
-        "question": "Ngân hàng giám sát của Quỹ TCSME là ngân hàng nào và chi nhánh nào?",
-        "ground_truth": "Ngân hàng TMCP Đầu tư và Phát triển Việt Nam (BIDV) - Chi nhánh Hà Thành."
-    },
-    {
-        "question": "Đại lý phân phối chứng chỉ quỹ (Distributor) và Đại lý chuyển nhượng (Transfer Agent) là những tổ chức nào?",
-        "ground_truth": "Đại lý phân phối: Công ty CP Chứng khoán Kỹ thương (TCBS). Đại lý chuyển nhượng: Trung tâm Lưu ký Chứng khoán Việt Nam (VSD)."
-    },
-    {
-        "question": "Trong trường hợp nào việc thực hiện lệnh bán của nhà đầu tư có thể bị thực hiện một phần (prorated)?",
-        "ground_truth": "Khi tổng giá trị lệnh bán ròng > 10% NAV hoặc việc thực hiện lệnh làm NAV Quỹ < 50 tỷ đồng."
-    },
-    {
-        "question": "Chương trình Đầu tư Định kỳ (SIP) sẽ tự động chấm dứt trong trường hợp nào?",
-        "ground_truth": "Khi Nhà Đầu Tư thông báo dừng hoặc không nộp tiền/không nộp đủ tiền mua trong 05 kỳ liên tiếp."
-    },
-    {
-        "question": "Rủi ro tái đầu tư (Reinvestment risk) được mô tả như thế nào trong Bản cáo bạch?",
-        "ground_truth": "Là rủi ro khi lãi suất thị trường giảm, tiền lãi hoặc gốc nhận được phải tái đầu tư với mức sinh lợi thấp hơn."
-    },
-    {
-        "question": "Nhà đầu tư nước ngoài cần thực hiện giao dịch đầu tư qua loại tài khoản vốn nào?",
-        "ground_truth": "Nhà đầu tư nước ngoài phải thực hiện qua Tài khoản vốn đầu tư gián tiếp (IICA) tại một ngân hàng thương mại ở Việt Nam."
-    },
-    {
-        "question": "Ai là những người chịu trách nhiệm chính về nội dung Bản cáo bạch từ phía Công ty quản lý quỹ?",
-        "ground_truth": "Bà Nguyễn Thị Thu Hiền (Chủ tịch HĐQT), Ông Đặng Lưu Dũng (Tổng Giám đốc), Bà Phan Thị Thu Hằng (Kế toán trưởng)."
-    },
-    {
-        "question": "Ban đại diện Quỹ bao gồm những thành viên nào?",
-        "ground_truth": "Ông Nhâm Hà Hải, Ông Đào Kiên Trung, Ông Trần Viết Thỏa."
-    },
-    {
-        "question": "Nhà đầu tư có những lựa chọn nào về việc nhận phân phối lợi nhuận (cổ tức)?",
-        "ground_truth": "Lựa chọn Nhận Cổ Tức Bằng Tiền (DPP) hoặc Lựa chọn Tái Đầu tư Cổ tức (DRIP)."
-    },
-    {
-        "question": "Nếu nhà đầu tư không chọn phương thức nhận cổ tức cụ thể, Quỹ sẽ áp dụng phương thức mặc định nào?",
-        "ground_truth": "Lựa chọn Tái Đầu tư Cổ tức (DRIP) sẽ được tự động áp dụng."
-    },
-    {
-        "question": "Công ty quản lý quỹ có được phép sử dụng vốn của Quỹ để cho vay không?",
-        "ground_truth": "Không. Công ty Quản Lý Quỹ không được sử dụng vốn và tài sản của Quỹ để cho vay hoặc bảo lãnh."
+        "question": "Ngân hàng BIDV - Chi nhánh Hà Thành thực hiện những nhiệm vụ lưu ký cụ thể nào cho quỹ?",
+        "ground_truth": "Thực hiện bảo quản, lưu ký chứng khoán, tài liệu quyền sở hữu tài sản, thực hiện thu các khoản lãi/cổ tức và giám sát các hoạt động đầu tư của Công ty quản lý quỹ."
     }
 ]
 

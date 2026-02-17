@@ -2,13 +2,15 @@ from django.db import models
 from django.contrib.postgres.fields import ArrayField
 import json
 from pgvector.django import VectorField, HnswIndex
-
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 class DocumentChunk(models.Model):
     document = models.ForeignKey('Document', on_delete=models.CASCADE, related_name='chunks')
     content = models.TextField()
     page_number = models.IntegerField()
     embedding = VectorField(dimensions=1024)
     created_at = models.DateTimeField(auto_now_add=True)
+    search_vector = SearchVectorField(null=True)
     class Meta:
         indexes = [
             # HNSW Index for fast approximate nearest neighbor search
@@ -17,8 +19,9 @@ class DocumentChunk(models.Model):
                 fields=['embedding'],
                 m=16,               # Max connections per layer (Default 16)
                 ef_construction=64, # Size of dynamic candidate list (Default 64)
-                opclasses=['vector_cosine_ops'] # Optimize for Cosine Similarity
-            )
+                opclasses=['vector_cosine_ops'], # Optimize for Cosine Similarity
+            ),
+            GinIndex(fields=['search_vector'], name='chunk_search_vector_idx')
         ]
 
     def __str__(self):
