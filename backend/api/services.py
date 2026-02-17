@@ -103,7 +103,11 @@ def create_optimized_pdf(original_pdf_path: str) -> str:
         original_pdf_path: Path to the original PDF file
         
     Returns:
-        Path to the optimized PDF file or original if too short
+        Tuple of (path, page_map) where page_map is a list of original
+        1-based page numbers kept in the optimized PDF.  For example
+        [1, 2, 3, 4, 8, 12] means optimized page 1 = original page 1,
+        optimized page 2 = original page 2, etc.
+        If the PDF is short enough to use as-is, page_map is None.
     """
     try:
         doc = fitz.open(original_pdf_path)
@@ -112,7 +116,7 @@ def create_optimized_pdf(original_pdf_path: str) -> str:
         # Nếu file ngắn, lấy hết luôn cho nhanh
         if total_pages <= 5:
             logger.info(f"PDF has only {total_pages} pages, returning original")
-            return original_pdf_path
+            return original_pdf_path, None
 
         # --- TỪ KHÓA QUAN TRỌNG ---
         # Lưu dạng có dấu (dễ đọc), nhưng so khớp sẽ dùng normalize_text_for_matching()
@@ -260,6 +264,9 @@ def create_optimized_pdf(original_pdf_path: str) -> str:
         sorted_pages = sorted(list(selected_pages))
         logger.info(f"Selected {len(sorted_pages)}/{total_pages} pages via OCR-scan. Used OCR on {pages_with_ocr} pages.")
 
+        # Build page map: optimized index -> original 1-based page number
+        page_map = [p + 1 for p in sorted_pages]  # convert 0-based to 1-based
+
         # Tạo file PDF mới
         doc.select(sorted_pages)
         fd, temp_path = tempfile.mkstemp(suffix=".pdf")
@@ -268,11 +275,11 @@ def create_optimized_pdf(original_pdf_path: str) -> str:
         doc.save(temp_path, garbage=4, deflate=True)
         doc.close()
         
-        return temp_path
+        return temp_path, page_map
 
     except Exception as e:
         logger.error(f"Error optimizing PDF: {str(e)}")
-        return original_pdf_path
+        return original_pdf_path, None
 
 class GeminiOCRService:
     """Service for OCR using Gemini 2.5 Flash Lite API"""
@@ -881,59 +888,111 @@ Now extract the data from the provided document."""
                     return s
 
                 def _ocr_best_rect(target_value: str):
-                    """Find the best matching OCR box for the given text value."""
+                    """Find OCR boxes matching the target text and merge them.
+
+                    For long paragraphs the OCR engine returns many small boxes
+                    (one per line / word).  We collect ALL boxes whose tokens
+                    overlap significantly with the target, then return their
+                    *union* bounding rectangle so the entire paragraph is
+                    highlighted — not just a single fragment.
+                    """
                     if not ocr_results:
                         return None
                     tv = _norm_for_match(target_value)
                     if not tv or len(tv) < 3:
                         return None
 
-                    best = None
-                    best_score = 0.0
+                    tv_tokens = set(tv.split())
+                    if not tv_tokens:
+                        return None
+
+                    # Collect every OCR box that shares tokens with the target
+                    matching_boxes = []  # list of (x0, y0, x1, y1)
 
                     for res in ocr_results:
                         try:
                             box, text, conf = res[0], res[1], res[2]
                         except Exception:
                             continue
-
                         if not text:
                             continue
+
                         ct = _norm_for_match(text)
                         if not ct:
                             continue
 
-                        # Simple robust scoring: containment + token overlap.
-                        score = 0.0
-                        if tv == ct:
-                            score = 1.0
-                        elif tv in ct or ct in tv:
-                            score = 0.9
-                        else:
-                            tv_tokens = set(tv.split())
-                            ct_tokens = set(ct.split())
-                            if tv_tokens and ct_tokens:
-                                overlap = len(tv_tokens & ct_tokens) / max(1, len(tv_tokens))
-                                score = 0.6 * overlap
+                        ct_tokens = set(ct.split())
+                        if not ct_tokens:
+                            continue
 
-                        # Prefer higher OCR confidence.
-                        try:
-                            score *= float(conf) if conf is not None else 1.0
-                        except Exception:
-                            pass
+                        # Score: what fraction of THIS OCR fragment's tokens
+                        # appear in the target value?
+                        frag_overlap = len(ct_tokens & tv_tokens) / len(ct_tokens)
 
-                        if score > best_score:
+                        # Accept if ≥60 % of the fragment's tokens are in the target.
+                        # This is deliberately lenient per-fragment because individual
+                        # OCR lines are short (e.g. 5-10 words).
+                        if frag_overlap >= 0.6:
                             xs = [p[0] for p in box]
                             ys = [p[1] for p in box]
-                            x0, x1 = min(xs), max(xs)
-                            y0, y1 = min(ys), max(ys)
-                            best = (x0, y0, x1, y1)
-                            best_score = score
+                            matching_boxes.append((min(xs), min(ys), max(xs), max(ys)))
 
-                    # Require high confidence for OCR snap to avoid wrong highlights
-                    if best and best_score >= 0.7:
-                        return best
-                    return None
+                    if not matching_boxes:
+                        # Fallback: try exact / containment match for short values
+                        best = None
+                        best_score = 0.0
+                        for res in ocr_results:
+                            try:
+                                box, text, conf = res[0], res[1], res[2]
+                            except Exception:
+                                continue
+                            if not text:
+                                continue
+                            ct = _norm_for_match(text)
+                            if not ct:
+                                continue
+
+                            score = 0.0
+                            if tv == ct:
+                                score = 1.0
+                            elif tv in ct or ct in tv:
+                                score = 0.9
+                            if score > best_score:
+                                xs = [p[0] for p in box]
+                                ys = [p[1] for p in box]
+                                best = (min(xs), min(ys), max(xs), max(ys))
+                                best_score = score
+                        if best and best_score >= 0.7:
+                            return best
+                        return None
+
+                    # Check that enough of the TARGET tokens were found across
+                    # all collected fragments (guards against false positives).
+                    all_matched_tokens: set[str] = set()
+                    for res in ocr_results:
+                        try:
+                            box, text, conf = res[0], res[1], res[2]
+                        except Exception:
+                            continue
+                        if not text:
+                            continue
+                        ct = _norm_for_match(text)
+                        ct_tokens = set(ct.split())
+                        frag_overlap = len(ct_tokens & tv_tokens) / max(len(ct_tokens), 1)
+                        if frag_overlap >= 0.6:
+                            all_matched_tokens.update(ct_tokens & tv_tokens)
+
+                    target_coverage = len(all_matched_tokens) / len(tv_tokens)
+                    if target_coverage < 0.4:
+                        return None
+
+                    # Merge all matching boxes into a single union rectangle
+                    x0 = min(b[0] for b in matching_boxes)
+                    y0 = min(b[1] for b in matching_boxes)
+                    x1 = max(b[2] for b in matching_boxes)
+                    y1 = max(b[3] for b in matching_boxes)
+
+                    return (x0, y0, x1, y1)
 
                 def _normalize_bbox(bbox):
                     """
@@ -1782,10 +1841,13 @@ class DocumentProcessingService:
             document.save(update_fields=['status'])
 
             # --- STEP 1: Optimize PDF (Page Segmentation) ---
+            optimized_page_map = None
             try:
-                # This function returns a temp file path containing only relevant pages
-                optimized_pdf_path = create_optimized_pdf(document.file.path)
+                # This function returns (temp_path, page_map)
+                optimized_pdf_path, optimized_page_map = create_optimized_pdf(document.file.path)
                 logger.info(f"Optimized PDF created at: {optimized_pdf_path}")
+                if optimized_page_map:
+                    logger.info(f"Page map: {len(optimized_page_map)} optimized pages -> original pages")
             except Exception as e:
                 logger.warning(f"PDF optimization failed, using original file: {e}")
                 optimized_pdf_path = document.file.path
@@ -1833,6 +1895,32 @@ class DocumentProcessingService:
                          extracted_data = {}
 
             document.extracted_data = extracted_data
+            
+            # Store optimized page map so frontend can map optimized page numbers
+            # back to original PDF page numbers for preview/navigation
+            if optimized_page_map:
+                extracted_data['_optimized_page_map'] = optimized_page_map
+
+                # Remap all bbox "page" values from optimized index to original page number.
+                # The AI wrote page numbers based on the optimized PDF; convert them back to
+                # original so the frontend can navigate to the correct page.
+                def remap_pages(obj):
+                    """Recursively remap 'page' fields inside extracted data."""
+                    if isinstance(obj, dict):
+                        if 'page' in obj and 'bbox' in obj:
+                            opt_page = obj['page']  # 1-based optimized page number from AI
+                            if isinstance(opt_page, int) and 1 <= opt_page <= len(optimized_page_map):
+                                obj['page'] = optimized_page_map[opt_page - 1]  # map to original
+                        for v in obj.values():
+                            remap_pages(v)
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            remap_pages(item)
+
+                remap_pages(extracted_data)
+                logger.info(f"Remapped page numbers in extracted_data using optimized_page_map ({len(optimized_page_map)} pages)")
+
+                document.extracted_data = extracted_data
             
             # Normalize data - extract fees from nested structure if present
             fees_obj = extracted_data.get('fees', {})
