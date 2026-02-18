@@ -48,6 +48,7 @@ class ChatResponseSerializer(serializers.Serializer):
     answer = serializers.CharField()
     query = serializers.CharField()
     chunks_count = serializers.IntegerField(required=False)
+    citations = serializers.ListField(required=False)
 
 
 class ChatHistorySerializer(serializers.Serializer):

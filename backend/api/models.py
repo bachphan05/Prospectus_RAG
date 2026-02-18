@@ -11,6 +11,7 @@ class DocumentChunk(models.Model):
     embedding = VectorField(dimensions=1024)
     created_at = models.DateTimeField(auto_now_add=True)
     search_vector = SearchVectorField(null=True)
+    content_ascii = models.TextField(null=True, blank=True)  # ASCII-only version for keyword search
     class Meta:
         indexes = [
             # HNSW Index for fast approximate nearest neighbor search

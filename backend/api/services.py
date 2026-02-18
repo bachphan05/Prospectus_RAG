@@ -25,6 +25,7 @@ import PIL.Image
 import PIL.ImageDraw
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F
+from unidecode import unidecode
 logger = logging.getLogger(__name__)
 
 
@@ -2297,6 +2298,7 @@ class RAGService:
             # We call a helper to get the raw markdown representation.
             full_text = self._extract_content_for_rag(document)
             full_text = self._clean_text_for_rag(full_text)
+            content_ascii = unidecode(full_text)
 
             if not full_text:
                 raise ValueError("Could not extract text content from document")
@@ -2484,14 +2486,19 @@ class RAGService:
             logger.info(f"Successfully saved {total_chunks} vector chunks total.")
 
             # Populate search_vector for keyword (full-text) search
+            # Use ASCII-ified content (strip Vietnamese diacritics) so that
+            # keyword search works regardless of whether the query has accents.
             try:
                 from django.db import connection
+                chunks_for_fts = DocumentChunk.objects.filter(document_id=document_id)
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        "UPDATE api_documentchunk SET search_vector = to_tsvector('simple', content) WHERE document_id = %s",
-                        [document_id],
-                    )
-                logger.info(f"Populated search_vector for {total_chunks} chunks (document {document_id}).")
+                    for chunk in chunks_for_fts.iterator():
+                        ascii_content = remove_vietnamese_diacritics(chunk.content)
+                        cursor.execute(
+                            "UPDATE api_documentchunk SET search_vector = to_tsvector('simple', %s) WHERE id = %s",
+                            [ascii_content, chunk.id],
+                        )
+                logger.info(f"Populated search_vector (ASCII) for {total_chunks} chunks (document {document_id}).")
             except Exception as e:
                 logger.warning(f"Failed to populate search_vector for document {document_id}: {e}")
 
@@ -2642,7 +2649,7 @@ THÔNG TIN CƠ BẢN ĐÃ ĐƯỢC TRÍCH XUẤT (từ Document.extracted_data):
             retrieved_chunks = []
             rag_context = ""
             try:
-                retrieved_chunks = self.hybrid_search(document_id, user_query, top_k=25)
+                retrieved_chunks = self.hybrid_search(document_id, user_query, top_k=5)
                 rag_context = "\n\n---\n\n".join(
                     [f"=== PAGE {c.page_number} ===\n{c.content}" for c in retrieved_chunks]
                 )
@@ -2730,10 +2737,22 @@ Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụn
                 response_text = response.text
             
             if return_source:
+                citations = []
+                for chunk in retrieved_chunks:
+                    try:
+                        citations.append({
+                            "chunk_id": chunk.id,
+                            "page": chunk.page_number,
+                            "quote": (chunk.content or "")[:400]
+                        })
+                    except Exception:
+                        continue
+
                 return {
                     "text": response_text,
                     "contexts": [c.content for c in retrieved_chunks],
-                    "structured_data_used": structured_info
+                    "structured_data_used": structured_info,
+                    "citations": citations,
                 }
             return response_text
 
@@ -2939,10 +2958,12 @@ Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụn
         # Get top 50 semantic results (fetch more than top_k to allow fusion to work)
         semantic_results = DocumentChunk.objects.filter(document_id=document_id) \
         .annotate(distance=CosineDistance('embedding', query_embedding)) \
-        .order_by('distance')[:50]
+        .order_by('distance')[:20]
         # 2. Keyword Search (BM25-like) - Captures "Specific Terms" (Names, IDs, Numbers)
         # Using the pre-computed GIN index makes this extremely fast.
-        search_query = SearchQuery(query_text, config='simple')
+        # Strip Vietnamese diacritics so the query matches the ASCII-ified search_vector.
+        ascii_query = remove_vietnamese_diacritics(query_text)
+        search_query = SearchQuery(ascii_query, config='simple')
         keyword_results = DocumentChunk.objects.filter(
         document_id=document_id, 
         search_vector=search_query

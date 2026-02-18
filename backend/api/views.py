@@ -623,12 +623,16 @@ class DocumentViewSet(viewsets.ModelViewSet):
         try:
             logger.info(f"RAG chat query for document {document.id}: {user_query[:50]}...")
             rag_service = RAGService()
-            answer = rag_service.chat(document.id, user_query, history)
-            
+            answer_payload = rag_service.chat(document.id, user_query, history, return_source=True)
+
+            answer_text = answer_payload.get('text') if isinstance(answer_payload, dict) else str(answer_payload)
+            citations = answer_payload.get('citations', []) if isinstance(answer_payload, dict) else []
+
             response_data = {
-                'answer': answer,
+                'answer': answer_text,
                 'query': user_query,
-                'chunks_count': document.chunks.count()
+                'chunks_count': document.chunks.count(),
+                'citations': citations,
             }
             
             return Response(response_data)
@@ -664,6 +668,100 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document.chat_history = history
         document.save(update_fields=['chat_history'])
         return Response({'history': document.chat_history or []})
+
+    @action(detail=True, methods=['get'], url_path='page-context/(?P<page_num>[0-9]+)')
+    def page_context(self, request, pk=None, page_num=None):
+        """
+        Returns a page image + bbox list for any quoted text on that page.
+        GET /api/documents/{id}/page-context/{page_num}/?quote=...
+        page_num is the RAW (original) 1-based page number.
+        """
+        document = self.get_object()
+        raw_page_num = int(page_num)
+        quote = (request.query_params.get('quote') or '').strip()
+
+        data = document.extracted_data or {}
+        page_map = data.get('_optimized_page_map') if isinstance(data, dict) else None
+        optimized_page_num = None
+
+        if document.optimized_file and isinstance(page_map, list):
+            try:
+                idx = page_map.index(raw_page_num)
+                optimized_page_num = idx + 1
+            except ValueError:
+                optimized_page_num = None
+
+        if document.optimized_file and optimized_page_num is not None:
+            pdf_path = document.optimized_file.path
+            render_page_num = optimized_page_num
+        else:
+            pdf_path = document.file.path
+            render_page_num = raw_page_num
+
+        try:
+            import re as _re
+
+            doc = fitz.open(pdf_path)
+            if render_page_num < 1 or render_page_num > len(doc):
+                doc.close()
+                return Response({'error': 'Page number out of range'}, status=status.HTTP_400_BAD_REQUEST)
+
+            page = doc.load_page(render_page_num - 1)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes('png')
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+
+            matched_bboxes = []
+            if quote:
+                quote_norm = _re.sub(r'\s+', ' ', quote).strip()
+                candidates = [quote_norm]
+                if len(quote_norm) > 220:
+                    candidates.append(quote_norm[:220])
+                words = quote_norm.split()
+                if len(words) > 8:
+                    candidates.append(' '.join(words[:8]))
+
+                rects = []
+                for q in candidates:
+                    if not q:
+                        continue
+                    try:
+                        found = page.search_for(q)
+                    except Exception:
+                        found = []
+                    if found:
+                        rects = found
+                        break
+
+                pr = page.rect
+                pw = max(float(pr.width), 1.0)
+                ph = max(float(pr.height), 1.0)
+                for r in rects[:10]:
+                    matched_bboxes.append([
+                        max(0, min(1000, float(r.y0) / ph * 1000)),
+                        max(0, min(1000, float(r.x0) / pw * 1000)),
+                        max(0, min(1000, float(r.y1) / ph * 1000)),
+                        max(0, min(1000, float(r.x1) / pw * 1000)),
+                    ])
+
+            doc.close()
+
+            return Response({
+                'raw_page_number': raw_page_num,
+                'render_page_number': render_page_num,
+                'image': f'data:image/png;base64,{img_base64}',
+                'width': pix.width,
+                'height': pix.height,
+                'quote': quote,
+                'matched_bboxes': matched_bboxes,
+            })
+
+        except Exception as e:
+            logger.error(f"Error building page context: {str(e)}")
+            return Response(
+                {'error': f'Failed to build page context: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @api_view(['GET'])

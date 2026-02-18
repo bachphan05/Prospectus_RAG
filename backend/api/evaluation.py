@@ -1,6 +1,11 @@
 import os
+import warnings
 import pandas as pd
 import ast
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 from datasets import Dataset
 from ragas import evaluate, RunConfig
 from ragas.metrics import (
@@ -11,17 +16,33 @@ from ragas.metrics import (
 )
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
-def run_evaluation():
-    print("--- Setting up RAGAS with Local Qwen 2.5 Judge ---")
+# ── Tuning knobs ──────────────────────────────────────────────────────────────
+# How many retrieved chunks to keep per sample when scoring.
+# 25 chunks → ~14k chars, fills the entire LLM context and serialises inference.
+# 5 chunks keeps the highest-ranked evidence while cutting context by ~80%.
+MAX_CONTEXT_CHUNKS = 5
 
-    # 1. Cấu hình Judge (Dùng Qwen 2.5 thay cho Llama 3)
+# Hard cap (chars) per individual chunk to avoid one giant table poisoning scores.
+MAX_CHUNK_CHARS = 1200
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_evaluation():
+    print("--- Setting up RAGAS with Local Llama 3.1 8B Judge ---")
+
+    # 1. Cấu hình Judge
+    # Llama 3.1 follows English instructions reliably with Vietnamese content.
+    # JSON mode is kept to improve schema adherence for RAGAS structured outputs.
     local_judge = ChatOllama(
-        model="qwen2.5:7b", # Đổi sang qwen2.5 để xử lý JSON chuẩn hơn
+        model="llama3.1:8b",
         base_url="http://localhost:11434",
         format="json",
         temperature=0,
-        num_ctx=16384, # Tăng context window để đọc được nhiều chunk tài chính
-        timeout=300    # Tăng thời gian chờ lên 5 phút
+        num_ctx=8192,
+        timeout=300,
+        system=(
+            "You are a strict JSON evaluation engine. "
+            "Return only valid JSON with no markdown, no prose, and no code fences."
+        ),
     )
 
     # 2. Cấu hình Embedding local
@@ -33,7 +54,7 @@ def run_evaluation():
     # 3. Khởi tạo Metrics với LLM đã chọn
     metrics = [
         Faithfulness(llm=local_judge),
-        AnswerRelevancy(llm=local_judge),
+        AnswerRelevancy(llm=local_judge, embeddings=local_embeddings),
         ContextPrecision(llm=local_judge),
         ContextRecall(llm=local_judge),
     ]
@@ -44,21 +65,32 @@ def run_evaluation():
     try:
         df = pd.read_csv(csv_path)
         df['contexts'] = df['contexts'].apply(ast.literal_eval)
+
+        # ── Context trimming ──────────────────────────────────────────────────
+        # Keep only the top-MAX_CONTEXT_CHUNKS chunks (already ranked by RRF score
+        # in generate_ragas_data, so first = most relevant).
+        # Also hard-cap each chunk to MAX_CHUNK_CHARS to avoid runaway tables.
+        def trim_contexts(ctx_list):
+            trimmed = ctx_list[:MAX_CONTEXT_CHUNKS]
+            return [c[:MAX_CHUNK_CHARS] for c in trimmed]
+
+        df['contexts'] = df['contexts'].apply(trim_contexts)
+        # ─────────────────────────────────────────────────────────────────────
+
         dataset = Dataset.from_pandas(df)
-        print(f"Loaded {len(dataset)} samples.")
+        avg_chars = df['contexts'].apply(lambda c: sum(len(x) for x in c)).mean()
+        print(f"Loaded {len(dataset)} samples. Avg context size after trim: {avg_chars:.0f} chars.")
     except Exception as e:
         print(f" Error loading CSV: {e}")
         return
 
-  
-
     print("\nRunning RAGAS Evaluation LOCALLY...")
-    print("Lưu ý: Đang chạy tuần tự để tránh timeout. Sẽ mất khoảng 15-30 phút.")
-    
+    print(f"Judge: llama3.1:8b (json mode) | Context: top {MAX_CONTEXT_CHUNKS} chunks, max {MAX_CHUNK_CHARS} chars each | workers=1 | num_ctx=8192")
+
     run_config = RunConfig(
-        max_workers=1,       # Sequential: 1 job at a time so Ollama isn't overwhelmed
-        max_wait=600,        # 10 min timeout per job
-        max_retries=3,       # Retry failed jobs up to 3 times
+        max_workers=1,
+        max_wait=420,    # 7 min timeout per job (Llama 3.1 is slightly slower than Qwen)
+        max_retries=8,   # More retries to handle occasional malformed LLM output
     )
 
     try:

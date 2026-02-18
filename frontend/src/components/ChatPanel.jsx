@@ -2,6 +2,44 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 
 /**
+ * Parses AI answer text and turns "Trang X" / "Page X" / "[Trang X, Y]" patterns
+ * into clickable span elements. All other text is rendered as-is.
+ */
+function parsePageRefs(text, onPageClick) {
+  // Matches: Trang 12, trang 12, Page 12, [Trang 12, 34], [Trang 12]
+  const pattern = /(?:\[Trang\s+([\d,\s]+)\]|(?:Trang|trang|Page|page)\s+(\d+))/g;
+  const parts = [];
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    const raw = match[1] || match[2];
+    const pages = raw.split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean);
+    pages.forEach((p, i) => {
+      if (i > 0) parts.push(', ');
+      parts.push(
+        <button
+          key={`${match.index}-${p}`}
+          type="button"
+          onClick={() => onPageClick(p)}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-200 transition-colors cursor-pointer"
+          title={`Open page ${p}`}
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          {i === 0 && pages.length > 1 ? `Trang ${p}` : `Trang ${p}`}
+        </button>
+      );
+    });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+/**
  * ChatPanel Component - AI-powered chat interface for documents
  */
 function ChatPanel({ document, onClose }) {
@@ -17,6 +55,11 @@ function ChatPanel({ document, onClose }) {
   const [ragProgress, setRagProgress] = useState(0);
   const [ragErrorMessage, setRagErrorMessage] = useState(null);
   const [error, setError] = useState(null);
+
+  // Side-by-side PDF page viewer state
+  const [activeCitation, setActiveCitation] = useState(null);  // { page, quote }
+  const [pageContext, setPageContext] = useState(null);         // response from getPageContext
+  const [loadingPageCtx, setLoadingPageCtx] = useState(false);
   const messagesEndRef = useRef(null);
   const hasLoadedHistoryRef = useRef(false);
   const saveDebounceRef = useRef(null);
@@ -254,6 +297,7 @@ function ChatPanel({ document, onClose }) {
         text: response.answer,
         timestamp: new Date(),
         chunks_count: response.chunks_count,
+        citations: Array.isArray(response.citations) ? response.citations : [],
       };
 
       setMessages((prev) => [...prev, aiMessage]);
@@ -278,8 +322,24 @@ function ChatPanel({ document, onClose }) {
     }
   };
 
+  const openPageFromChat = async (pageNum, quote = '') => {
+    if (!document?.id) return;
+    setActiveCitation({ page: pageNum, quote });
+    setLoadingPageCtx(true);
+    setPageContext(null);
+    try {
+      const ctx = await api.getPageContext(document.id, pageNum, quote);
+      setPageContext(ctx);
+    } catch (err) {
+      console.error('Failed to load page context:', err);
+    } finally {
+      setLoadingPageCtx(false);
+    }
+  };
+
   const suggestedQuestions = [
     'What is the management fee? (Phí quản lý là bao nhiêu?)',
+
     'Who is the custodian bank? (Ngân hàng giám sát là ai?)',
     'What are the fund\'s investment objectives? (Mục tiêu đầu tư của quỹ là gì?)',
     'What are the subscription and redemption fees? (Phí mua và phí bán là bao nhiêu?)',
@@ -287,7 +347,7 @@ function ChatPanel({ document, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col">
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-[96vw] h-[88vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-blue-700">
           <div className="flex items-center gap-3">
@@ -429,7 +489,9 @@ function ChatPanel({ document, onClose }) {
 
         {/* Chat Interface */}
         {isIngested && (
-          <>
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+            {/* ── Left: messages + input ── */}
+            <div className={`flex flex-col min-h-0 ${activeCitation ? 'w-1/2 border-r border-gray-200' : 'w-full'}`}>
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
               {isLoadingHistory && !isHistoryLoaded && messages.length === 0 && (
@@ -486,7 +548,16 @@ function ChatPanel({ document, onClose }) {
                         </svg>
                       )}
                       <div className="flex-1">
-                        <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                        {message.sender === 'ai' ? (
+                          <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                            {parsePageRefs(message.text, (p) => openPageFromChat(p,
+                              /* pass the chunk quote whose page matches, if any */
+                              (message.citations || []).find(c => c.page === p)?.quote || ''
+                            ))}
+                          </p>
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                        )}
                         <p className="text-xs opacity-70 mt-1">
                           {message.timestamp.toLocaleTimeString()}
                         </p>
@@ -560,7 +631,90 @@ function ChatPanel({ document, onClose }) {
                 Press Enter to send, Shift+Enter for new line (Nhấn Enter để gửi, Shift+Enter để xuống dòng)
               </p>
             </div>
-          </>
+            </div>{/* end left pane */}
+
+            {/* ── Right: PDF page viewer ── */}
+            {activeCitation && (
+              <div className="w-1/2 flex flex-col min-h-0 bg-gray-50">
+                {/* Panel header */}
+                <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200 shrink-0">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">
+                      Trang {activeCitation.page}
+                    </p>
+                    <p className="text-xs text-gray-500">Source page</p>
+                  </div>
+                  <button
+                    onClick={() => { setActiveCitation(null); setPageContext(null); }}
+                    className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Page image + highlights */}
+                <div className="flex-1 min-h-0 overflow-auto p-4">
+                  {loadingPageCtx && (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+
+                  {!loadingPageCtx && pageContext?.image && (
+                    <div className="space-y-3">
+                      {/* Page with highlight overlay */}
+                      <div className="relative bg-white rounded border border-gray-200 overflow-hidden shadow">
+                        <img
+                          src={pageContext.image}
+                          alt={`Page ${activeCitation.page}`}
+                          className="w-full h-auto block"
+                        />
+                        {/* Yellow highlight boxes over matched text */}
+                        {Array.isArray(pageContext.matched_bboxes) && pageContext.matched_bboxes.map((bbox, idx) => {
+                          const [ymin, xmin, ymax, xmax] = bbox;
+                          return (
+                            <div
+                              key={idx}
+                              className="absolute border-2 border-yellow-400 bg-yellow-300 bg-opacity-40 pointer-events-none"
+                              style={{
+                                top: `${ymin / 10}%`,
+                                left: `${xmin / 10}%`,
+                                width: `${(xmax - xmin) / 10}%`,
+                                height: `${(ymax - ymin) / 10}%`,
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {/* Snippet card */}
+                      {activeCitation.quote && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                          <p className="text-xs font-semibold text-yellow-900 mb-1">Đoạn trích nguồn</p>
+                          <p className="text-sm text-yellow-900 whitespace-pre-wrap leading-relaxed">
+                            {activeCitation.quote}
+                          </p>
+                          {Array.isArray(pageContext.matched_bboxes) && pageContext.matched_bboxes.length === 0 && (
+                            <p className="text-xs text-yellow-700 mt-2 italic">
+                              Không tìm thấy vị trí chính xác trên trang; hiển thị đoạn trích gốc.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!loadingPageCtx && !pageContext?.image && (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                      Không thể tải trang.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div> /* end flex chat+pdf */
         )}
       </div>
     </div>

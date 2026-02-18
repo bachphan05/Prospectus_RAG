@@ -253,6 +253,24 @@ class ApiService {
   }
 
   /**
+   * Get page image + matched-text highlight boxes for a citation
+   * @param {number} id - Document ID
+   * @param {number} pageNum - Raw 1-based page number
+   * @param {string} quote - Text snippet to locate on the page
+   * @returns {Promise} Page context payload
+   */
+  async getPageContext(id, pageNum, quote = '') {
+    const base = `${API_BASE_URL}/documents/${id}/page-context/${pageNum}/`;
+    const qs = quote ? `?quote=${encodeURIComponent(quote)}` : '';
+    const response = await fetch(base + qs);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || 'Failed to load page context');
+    }
+    return response.json();
+  }
+
+  /**
    * Ingest document for RAG (create vector embeddings)
    * @param {number} id - Document ID
    * @returns {Promise} Ingestion result
