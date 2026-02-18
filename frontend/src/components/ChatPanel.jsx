@@ -1,42 +1,154 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 /**
- * Parses AI answer text and turns "Trang X" / "Page X" / "[Trang X, Y]" patterns
- * into clickable span elements. All other text is rendered as-is.
+ * PageLink – small pill button for a single "Trang X" reference.
  */
-function parsePageRefs(text, onPageClick) {
-  // Matches: Trang 12, trang 12, Page 12, [Trang 12, 34], [Trang 12]
-  const pattern = /(?:\[Trang\s+([\d,\s]+)\]|(?:Trang|trang|Page|page)\s+(\d+))/g;
-  const parts = [];
+function PageLink({ page, onPageClick }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPageClick(page)}
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-semibold
+                 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200
+                 transition-colors cursor-pointer align-baseline mx-0.5"
+      title={`Open page ${page}`}
+    >
+      <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
+             l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+      Trang {page}
+    </button>
+  );
+}
+
+/**
+ * Splits a plain string into React nodes, replacing every "Trang X" / "trang X" /
+ * "Page X" occurrence with a <PageLink>.
+ */
+function injectPageLinks(str, onPageClick) {
+  const pattern = /(?:\[(?:Trang|trang|Page|page)\s+([\d,\s]+)\]|(?:Trang|trang|Page|page)\s+(\d+))/g;
+  const nodes = [];
   let last = 0;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) parts.push(text.slice(last, match.index));
-    const raw = match[1] || match[2];
-    const pages = raw.split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean);
-    pages.forEach((p, i) => {
-      if (i > 0) parts.push(', ');
-      parts.push(
-        <button
-          key={`${match.index}-${p}`}
-          type="button"
-          onClick={() => onPageClick(p)}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-200 transition-colors cursor-pointer"
-          title={`Open page ${p}`}
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          {i === 0 && pages.length > 1 ? `Trang ${p}` : `Trang ${p}`}
-        </button>
-      );
+  let m;
+  while ((m = pattern.exec(str)) !== null) {
+    if (m.index > last) nodes.push(str.slice(last, m.index));
+    const raw = m[1] || m[2];
+    raw.split(',').forEach((s, i) => {
+      const p = parseInt(s.trim(), 10);
+      if (!p) return;
+      if (i > 0) nodes.push(', ');
+      nodes.push(<PageLink key={`${m.index}-${p}`} page={p} onPageClick={onPageClick} />);
     });
-    last = match.index + match[0].length;
+    last = m.index + m[0].length;
   }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
+  if (last < str.length) nodes.push(str.slice(last));
+  return nodes;
+}
+
+/**
+ * Recursively walks React children produced by react-markdown and replaces
+ * plain string leaves with injectPageLinks output.
+ */
+function walkChildren(children, onPageClick) {
+  return Array.isArray(children)
+    ? children.map((child, i) => {
+        if (typeof child === 'string') {
+          const links = injectPageLinks(child, onPageClick);
+          return links.length === 1 && typeof links[0] === 'string'
+            ? links[0]
+            : <span key={i}>{links}</span>;
+        }
+        if (child && typeof child === 'object' && child.props?.children) {
+          return { ...child, props: { ...child.props, children: walkChildren(child.props.children, onPageClick) } };
+        }
+        return child;
+      })
+    : typeof children === 'string'
+    ? injectPageLinks(children, onPageClick)
+    : children;
+}
+
+/**
+ * Custom component overrides for react-markdown.
+ * All text nodes get page-ref injection; styling matches a ChatGPT-like look.
+ */
+function makeComponents(onPageClick) {
+  const txt = (children) => walkChildren(children, onPageClick);
+  return {
+    // Headings
+    h1: ({ children }) => <h1 className="text-lg font-bold mt-4 mb-2 text-gray-900">{txt(children)}</h1>,
+    h2: ({ children }) => <h2 className="text-base font-bold mt-3 mb-1.5 text-gray-900">{txt(children)}</h2>,
+    h3: ({ children }) => <h3 className="text-sm font-bold mt-2 mb-1 text-gray-900">{txt(children)}</h3>,
+    // Paragraphs
+    p: ({ children }) => <p className="text-sm leading-relaxed mb-2 last:mb-0">{txt(children)}</p>,
+    // Bold / italic
+    strong: ({ children }) => <strong className="font-semibold text-gray-900">{txt(children)}</strong>,
+    em: ({ children }) => <em className="italic">{txt(children)}</em>,
+    // Lists
+    ul: ({ children }) => <ul className="list-disc list-outside pl-5 mb-2 space-y-0.5 text-sm">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal list-outside pl-5 mb-2 space-y-0.5 text-sm">{children}</ol>,
+    li: ({ children }) => <li className="leading-relaxed">{txt(children)}</li>,
+    // Blockquote
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-4 border-blue-300 pl-3 my-2 text-gray-600 italic text-sm">
+        {children}
+      </blockquote>
+    ),
+    // Inline code
+    code: ({ inline, children }) =>
+      inline ? (
+        <code className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 font-mono text-xs">
+          {children}
+        </code>
+      ) : (
+        <code className="block bg-gray-100 rounded p-3 font-mono text-xs overflow-x-auto whitespace-pre my-2">
+          {children}
+        </code>
+      ),
+    pre: ({ children }) => <pre className="my-2">{children}</pre>,
+    // Tables (GFM)
+    table: ({ children }) => (
+      <div className="overflow-x-auto my-3">
+        <table className="min-w-full text-sm border border-gray-200 rounded">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className="bg-gray-50">{children}</thead>,
+    tbody: ({ children }) => <tbody className="divide-y divide-gray-100">{children}</tbody>,
+    tr: ({ children }) => <tr>{children}</tr>,
+    th: ({ children }) => (
+      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">
+        {txt(children)}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="px-3 py-2 text-gray-800">{txt(children)}</td>
+    ),
+    // Horizontal rule
+    hr: () => <hr className="my-3 border-gray-200" />,
+    // Links – keep them inert so they don't navigate away
+    a: ({ children, href }) => (
+      <span className="text-blue-600 underline cursor-default" title={href}>{txt(children)}</span>
+    ),
+  };
+}
+
+/**
+ * AiMessage – renders an AI response with full markdown + clickable page refs.
+ */
+function AiMessage({ text, onPageClick }) {
+  const components = makeComponents(onPageClick);
+  return (
+    <div className="prose prose-sm max-w-none text-gray-900">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 /**
@@ -547,18 +659,20 @@ function ChatPanel({ document, onClose }) {
                           <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767c.28.149.599.233.938.233h2l3 3v-3h2a2 2 0 002-2V9a2 2 0 00-2-2h-1z" />
                         </svg>
                       )}
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         {message.sender === 'ai' ? (
-                          <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                            {parsePageRefs(message.text, (p) => openPageFromChat(p,
-                              /* pass the chunk quote whose page matches, if any */
+                          <AiMessage
+                            text={message.text}
+                            citations={message.citations || []}
+                            onPageClick={(p) => openPageFromChat(
+                              p,
                               (message.citations || []).find(c => c.page === p)?.quote || ''
-                            ))}
-                          </p>
+                            )}
+                          />
                         ) : (
                           <p className="text-sm whitespace-pre-wrap">{message.text}</p>
                         )}
-                        <p className="text-xs opacity-70 mt-1">
+                        <p className="text-xs opacity-70 mt-1.5">
                           {message.timestamp.toLocaleTimeString()}
                         </p>
                       </div>
