@@ -26,6 +26,13 @@ import PIL.ImageDraw
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import F
 from unidecode import unidecode
+
+try:
+    from flashrank import Ranker, RerankRequest
+except Exception:  # pragma: no cover
+    Ranker = None
+    RerankRequest = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -2212,6 +2219,24 @@ class RAGService:
         self.ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434').strip()
         self.ollama_model = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b').strip()
         self.mistral_chat_model = os.getenv('MISTRAL_CHAT_MODEL', 'mistral-small-latest').strip()
+
+        # Optional reranker (FlashRank) to improve final retrieval ordering.
+        self.enable_rerank = os.getenv('RAG_ENABLE_RERANK', 'true').strip().lower() in {'1', 'true', 'yes'}
+        self.flashrank_model = os.getenv('FLASHRANK_MODEL', 'ms-marco-MiniLM-L-12-v2').strip()
+        self.rerank_top_k = int(os.getenv('RAG_RERANK_TOP_K', '5'))
+        self.retrieval_candidates_k = int(os.getenv('RAG_RETRIEVAL_CANDIDATES_K', '15'))
+        self.reranker = None
+
+        if self.enable_rerank:
+            if Ranker is None or RerankRequest is None:
+                logger.warning('RAG rerank enabled but flashrank is unavailable; continuing without rerank.')
+            else:
+                try:
+                    self.reranker = Ranker(model_name=self.flashrank_model)
+                    logger.info(f"FlashRank initialized with model={self.flashrank_model}")
+                except Exception as e:
+                    self.reranker = None
+                    logger.warning(f"Failed to initialize FlashRank reranker: {e}")
         
         logger.info(f"RAGService initialized with chat_provider={self.chat_provider}")
         
@@ -2649,7 +2674,16 @@ THÔNG TIN CƠ BẢN ĐÃ ĐƯỢC TRÍCH XUẤT (từ Document.extracted_data):
             retrieved_chunks = []
             rag_context = ""
             try:
-                retrieved_chunks = self.hybrid_search(document_id, user_query, top_k=5)
+                candidate_chunks = self.hybrid_search(
+                    document_id,
+                    user_query,
+                    top_k=max(self.retrieval_candidates_k, self.rerank_top_k),
+                )
+                retrieved_chunks = self._rerank_chunks(
+                    user_query=user_query,
+                    chunks=candidate_chunks,
+                    top_k=self.rerank_top_k,
+                )
                 rag_context = "\n\n---\n\n".join(
                     [f"=== PAGE {c.page_number} ===\n{c.content}" for c in retrieved_chunks]
                 )
@@ -2657,27 +2691,39 @@ THÔNG TIN CƠ BẢN ĐÃ ĐƯỢC TRÍCH XUẤT (từ Document.extracted_data):
                 logger.warning(f"RAG retrieval failed for document {document_id}: {str(e)}")
 
             # 3. Tổng hợp Prompt: dùng cả JSON + Vector
+            # ...existing code...
+
             system_prompt = f"""
-Bạn là trợ lý phân tích tài chính thông minh chuyên về Quỹ đầu tư.
+Bạn là một Robot Kiểm toán Tài chính có tư duy logic cực kỳ nghiêm khắc. Nhiệm vụ của bạn là trích xuất thông tin từ tài liệu quỹ đầu tư với độ chính xác tuyệt đối (100%).
 
-HÃY SỬ DỤNG CẢ HAI NGUỒN THÔNG TIN SAU ĐỂ TRẢ LỜI:
+### QUY TẮC CỐT LÕI (SỐNG CÒN):
+1. **NGUYÊN TẮC "ZERO EXTERNAL KNOWLEDGE":** Bạn KHÔNG CÓ kiến thức về thế giới bên ngoài. Bạn CHỈ biết những gì được viết trong NGUỒN 1 và NGUỒN 2. 
+   - Nếu tài liệu không ghi, bạn PHẢI trả lời: "Tôi không tìm thấy thông tin này trong tài liệu."
+   - TUYỆT ĐỐI không được nói "Theo tôi biết...", "Thông thường...", hoặc "Dựa trên quy định chung...".
 
-NGUỒN 1: DỮ LIỆU CẤU TRÚC (ƯU TIÊN dùng cho câu hỏi về Phí, Tên, Mã số, Ngân hàng, Công ty quản lý)
+2. **XÁC THỰC HAI BƯỚC (BẮT BUỘC):** - Bước 1: Tìm câu văn chứa câu trả lời trong nguồn.
+   - Bước 2: So khớp từng con số, từng chữ cái giữa câu trả lời và nguồn. Nếu sai lệch dù chỉ 1 đơn vị, phải sửa lại hoặc báo không thấy.
+
+3. **ĐỊNH DẠNG TRÍCH DẪN:** - Phải trích dẫn nguồn ngay sau mệnh đề chứa thông tin đó. 
+   - Định dạng: [Trang X]. Nếu lấy từ dữ liệu cấu trúc: [Dữ liệu hệ thống].
+
+4. **XỬ LÝ CON SỐ:** - Giữ nguyên định dạng số trong tài liệu (ví dụ: 1,2% hoặc 1.2%). Không tự ý làm tròn.
+
+### QUY TRÌNH SUY NGHĨ (Nội tâm):
+Trước khi trả lời, hãy tự hỏi: "Câu này có bằng chứng trực tiếp trong text không? Số trang nằm ở đâu?".
+
+### CẤU TRÚC CÂU TRẢ LỜI:
+- Trả lời trực tiếp, ngắn gọn, đi thẳng vào vấn đề.
+- Sử dụng danh sách gạch đầu dòng nếu có nhiều ý.
+- Cuối câu trả lời, nếu có thể, hãy trích dẫn nguyên văn một đoạn ngắn từ tài liệu để làm bằng chứng.
+
+---
+NGUỒN 1 - DỮ LIỆU CẤU TRÚC:
 {structured_info}
 
-NGUỒN 2: TRÍCH ĐOẠN VĂN BẢN CHI TIẾT (dùng cho câu hỏi giải thích, chiến lược, rủi ro, điều khoản...)
+NGUỒN 2 - TRÍCH ĐOẠN TÀI LIỆU:
 {rag_context}
-
-QUY TẮC:
-1. Nếu người dùng hỏi về Phí hoặc Số liệu cụ thể, hãy kiểm tra NGUỒN 1 trước.
-2. Nếu NGUỒN 1 không có / không đủ, hãy dùng NGUỒN 2.
-3. Trả lời bằng tiếng Việt, chuyên nghiệp, đầy đủ ý. Nếu thông tin nằm trong bảng, hãy trình bày lại dưới dạng danh sách hoặc bảng để người dùng dễ hiểu. 
-Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụng cho đối tượng nào).
-4. Cuối mỗi câu trả lời, hãy ghi rõ thông tin này được lấy từ trang mấy (ví dụ: Nguồn: Trang 5)
-5. Nếu thông tin tổng hợp từ nhiều trang: [Trang X, Y].
-6. Nếu không tìm thấy thông tin từ cả hai nguồn, hãy nói: "Tôi không tìm thấy thông tin đó trong tài liệu."
-""".strip()
-            
+"""
             # Generate response based on provider
             response_text = ""
             
@@ -2958,7 +3004,8 @@ Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụn
         # Get top 50 semantic results (fetch more than top_k to allow fusion to work)
         semantic_results = DocumentChunk.objects.filter(document_id=document_id) \
         .annotate(distance=CosineDistance('embedding', query_embedding)) \
-        .order_by('distance')[:20]
+        .filter(distance__lt = 0.85) \
+        .order_by('distance')[:30]
         # 2. Keyword Search (BM25-like) - Captures "Specific Terms" (Names, IDs, Numbers)
         # Using the pre-computed GIN index makes this extremely fast.
         # Strip Vietnamese diacritics so the query matches the ASCII-ified search_vector.
@@ -2994,3 +3041,55 @@ Luôn bao gồm các điều kiện đi kèm nếu có (ví dụ: phí áp dụn
         final_chunks.sort(key=lambda chunk: fused_scores[chunk.id], reverse=True)
         
         return final_chunks
+
+    def _rerank_chunks(self, user_query: str, chunks: list, top_k: int = 5) -> list:
+        """
+        Rerank retrieved chunks with FlashRank.
+        Falls back to original order if reranker is unavailable or errors.
+        """
+        if not chunks:
+            return []
+
+        fallback = chunks[:top_k]
+        if not self.enable_rerank or self.reranker is None or RerankRequest is None:
+            return fallback
+
+        try:
+            passages = []
+            for idx, chunk in enumerate(chunks):
+                passages.append({
+                    "id": str(chunk.id),
+                    "text": chunk.content or "",
+                    "meta": {"idx": idx},
+                })
+
+            rerank_request = RerankRequest(query=user_query, passages=passages)
+            reranked = self.reranker.rerank(rerank_request)
+
+            if not reranked:
+                return fallback
+
+            ordered_chunks = []
+            seen_ids = set()
+            id_to_chunk = {str(c.id): c for c in chunks}
+
+            for item in reranked:
+                item_id = str(item.get("id", ""))
+                if item_id and item_id in id_to_chunk and item_id not in seen_ids:
+                    ordered_chunks.append(id_to_chunk[item_id])
+                    seen_ids.add(item_id)
+                    if len(ordered_chunks) >= top_k:
+                        break
+
+            if len(ordered_chunks) < top_k:
+                for chunk in chunks:
+                    cid = str(chunk.id)
+                    if cid not in seen_ids:
+                        ordered_chunks.append(chunk)
+                        if len(ordered_chunks) >= top_k:
+                            break
+
+            return ordered_chunks
+        except Exception as e:
+            logger.warning(f"FlashRank rerank failed, using fallback ranking: {e}")
+            return fallback
