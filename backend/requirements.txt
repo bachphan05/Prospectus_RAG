@@ -16,3 +16,5 @@ ragas
 langchain-google-genai 
 datasets
 flashrank
+react-markdown
+remark-gfm
