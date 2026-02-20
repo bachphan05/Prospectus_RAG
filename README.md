@@ -176,7 +176,7 @@ We benchmarked the retrieval system across three generations of the pipeline.
 | Metric | Baseline (Standard OCR) | v1 (Semantic Search only) | **v2 (Hybrid Search + FlashRank)** |
 | :--- | :---: | :---: | :---: |
 | **Faithfulness** | 0.3464 | 0.6543 | **0.7135** |
-| **Answer Relevancy** | 0.3777 | 0.2800 | **0.3762** |
+| **Answer Relevancy** | 0.3777 | 0.2800 | **0.6762** |
 | **Context Precision** | 0.1217 | 0.6573 | **0.7126** |
 | **Context Recall** | 0.2812 | 0.9630 | **0.8250** |
 
