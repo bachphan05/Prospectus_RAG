@@ -4,9 +4,10 @@ django-cors-headers
 python-dotenv
 psycopg[binary]
 pgvector
-google-generativeai
+google-genai
 mistralai
 langchain-text-splitters
+langchain-ollama
 rapidocr-onnxruntime
 PyMuPDF
 PyPDF2
@@ -16,5 +17,3 @@ ragas
 langchain-google-genai 
 datasets
 flashrank
-react-markdown
-remark-gfm

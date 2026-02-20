@@ -1,6 +1,6 @@
-# OCR System Architecture & Flow Documentation
+﻿# OCR System Architecture & Flow Documentation
 
-**Last Updated:** February 9, 2026
+**Last Updated:** February 19, 2026
 
 ## Table of Contents
 1. [System Overview](#system-overview)
@@ -22,11 +22,17 @@ This is a **Vietnamese Investment Fund Prospectus OCR System** that:
 **Tech Stack:**
 - **Backend:** Django 5.0 + PostgreSQL with pgvector
 - **Frontend:** React + Vite
-- **AI Models:** 
-  - Gemini 2.0 Flash (default OCR + RAG)
-  - Mistral Large / Mistral OCR (alternative)
-- **Embedding:** Google Text-Embedding-004 (768 dimensions)
-- **Vector Search:** pgvector with HNSW index
+- **Python:** 3.13.5
+- **AI Models:**
+  - Gemini 2.5 Flash Lite (structured extraction + RAG fallback OCR) — via `google.genai` new SDK
+  - Mistral OCR Latest (primary RAG text extraction, always-on)
+  - Mistral Large / Mistral OCR + Small (alternative structured extraction)
+- **Embedding:** Mistral `mistral-embed-2312` (1024 dimensions)
+- **Vector Search:** pgvector with HNSW index (cosine similarity)
+- **Keyword Search:** PostgreSQL full-text search with GIN index (BM25-like)
+- **Retrieval:** Hybrid (Vector + Keyword) with Reciprocal Rank Fusion (RRF)
+- **Reranker:** FlashRank `ms-marco-MiniLM-L-12-v2` (optional)
+- **RAG Chat:** Configurable — Ollama (`qwen2.5:7b` default), Gemini, or Mistral
 
 ---
 
@@ -34,17 +40,18 @@ This is a **Vietnamese Investment Fund Prospectus OCR System** that:
 
 ### Flow Overview
 ```
-Upload PDF → PDF Optimization → Structured Data Extraction → Storage → (Optional) RAG Ingestion
+Upload PDF → PDF Optimization → Structured Data Extraction → Storage → (Auto) RAG Ingestion
 ```
 
 ### Stage 1: Document Upload
-**Endpoint:** `POST /api/documents/`  
+**Endpoint:** `POST /api/documents/`
 **File:** `backend/api/views.py` - `DocumentViewSet.create()`
 
 1. User uploads PDF via frontend
 2. Django saves file to `media/documents/YYYY/MM/DD/`
 3. Document record created with status `'pending'`
 4. Asynchronous processing triggered via background thread
+5. RAG ingestion is **auto-triggered** after extraction completes (controlled by `AUTO_RAG_INGEST_ON_UPLOAD`, default `true`)
 
 ### Stage 2: PDF Optimization
 **Function:** `backend/api/services.py` - `create_optimized_pdf()`
@@ -56,14 +63,15 @@ Upload PDF → PDF Optimization → Structured Data Extraction → Storage → (
 2. For each page:
    - **Digital PDF:** Extract text with `page.get_text("text")`
    - **Scanned PDF:** Use RapidOCR to extract text from rendered image
-3. Check for Vietnamese keywords:
-   - "bản cáo bạch" (prospectus)
-   - "nội dung" (contents)
-   - "phí", "phí dịch vụ" (fees)
-   - "quỹ", "fund"
-4. Keep only pages containing ≥2 keywords
-5. Create optimized PDF with filtered pages
+3. Check for Vietnamese keywords (normalized via `unidecode` for robustness):
+   - "ban cao bach" (prospectus)
+   - "noi dung" (contents)
+   - "phi", "phi dich vu" (fees)
+   - "quy", "fund"
+4. Keep only pages containing >=2 keywords (up to `max_selected_pages`)
+5. Create optimized PDF with `garbage=4, deflate=True` compression
 6. Save to `media/optimized_documents/YYYY/MM/DD/`
+7. Return `(temp_path, page_map)` — `page_map` maps optimized index -> original 1-based page number
 
 **Fallback:** If optimization fails, use original PDF
 
@@ -71,45 +79,46 @@ Upload PDF → PDF Optimization → Structured Data Extraction → Storage → (
 **Service:** `backend/api/services.py` - `DocumentProcessingService._process_document_task()`
 
 **Models Available:**
-- **Gemini 2.0 Flash** (default) - Best accuracy
-- **Mistral Large** - Alternative for comparison
-- **Mistral OCR + Small** - Hybrid approach
+- **Gemini 2.5 Flash Lite** (`gemini` — default) — uploads PDF via `google.genai` Files API, extracts JSON with bounding boxes
+- **Mistral Large** (`mistral`) — Mistral OCR -> Mistral chat for JSON extraction
+- **Mistral OCR + Small** (`mistral-ocr`) — same pipeline, different extraction model
 
 **Process:**
-1. Choose PDF: optimized (preferred) or original (fallback)
+1. Choose PDF: optimized (preferred) or original (fallback on failure)
 2. Call AI service with detailed extraction schema
 3. AI extracts 50+ fields including:
    - Basic info: fund name, code, type, license
-   - Fees: management, subscription, redemption, switching
-   - Governance: management company, custodian bank
-   - Investment: strategy, restrictions, limits
+   - Fees: management, subscription, redemption, switching, TER, custody, audit, supervisory, other
+   - Governance: management company, custodian bank, auditor, regulator
+   - Investment: strategy, restrictions, limits, benchmark, style
+   - Operations: trading frequency, cut-off time, NAV calculation, settlement cycle
+   - Valuation: method, pricing source
    - Performance: portfolio, NAV history, dividends
    - Risk factors: concentration, liquidity, interest rate
-4. Parse and validate JSON response
-5. Store in `Document.extracted_data` (PostgreSQL JSONB)
-6. Create/update `ExtractedFundData` normalized model
-7. Update status to `'completed'` or `'failed'`
+4. Remap page numbers from optimized -> original using `page_map`
+5. Parse and validate JSON response
+6. Store in `Document.extracted_data` (PostgreSQL JSONB)
+7. Create/update `ExtractedFundData` normalized model
+8. Update status to `'completed'` or `'failed'`
 
-**Extraction Schema Location:** `_get_extraction_schema()` - returns detailed JSON schema with:
-- Field types and descriptions
-- Bounding box coordinates (page, bbox [ymin, xmin, ymax, xmax])
-- Nested objects for complex data (fees, portfolio, etc.)
+**Extraction Schema:** `_get_extraction_schema()` — fields return `{value, page, bbox}` objects where `bbox` is `[ymin, xmin, ymax, xmax]` on a 0-1000 scale per page.
 
 ### Stage 4: Storage
 **Models:** `backend/api/models.py`
 
-1. **Document** - Main table
-   - File paths (original + optimized)
+1. **Document** — Main table
+   - File paths (original + optimized + markdown)
    - Processing status and timestamps
-   - JSON extracted data
-   - Chat history
+   - JSON extracted data (JSONB)
+   - Chat history (JSONB)
+   - RAG ingestion status + progress (0-100)
    - Edit tracking
 
-2. **ExtractedFundData** - Normalized structured data
-   - All fund fields as database columns
+2. **ExtractedFundData** — Normalized structured data
+   - 50+ fields as database columns
    - Easier querying and filtering
 
-3. **DocumentChangeLog** - Audit trail
+3. **DocumentChangeLog** — Audit trail
    - Tracks all user edits
    - Stores before/after values
 
@@ -119,238 +128,197 @@ Upload PDF → PDF Optimization → Structured Data Extraction → Storage → (
 
 ### Overview
 ```
-Extract Full Text → Clean → Chunk → Embed → Store in Vector DB → Query → Retrieve → Generate Answer
+Extract Full Text -> Clean -> Chunk -> Embed -> Store (Vector + ASCII) -> Query -> Hybrid Retrieve -> Rerank -> Generate Answer
 ```
 
 ### Trigger Points
-1. **Automatic:** After document processing completes (if enabled)
+1. **Automatic:** After document processing completes (if `AUTO_RAG_INGEST_ON_UPLOAD=true`)
 2. **Manual:** `POST /api/documents/{id}/ingest_for_rag/`
-3. **Background:** Auto-triggered via threading in `DocumentViewSet.create()`
+3. **Guard:** Skipped if `rag_status` is already `queued`, `running`, or `completed`
 
 ### Stage 1: Full Text Extraction for RAG
-**Function:** `RAGService._extract_content_for_rag()`  
-**Location:** `backend/api/services.py:2470-2618`
+**Function:** `RAGService._extract_content_for_rag()`
 
 **Process:**
 1. **File Selection:**
+   - Prefer ORIGINAL PDF (higher quality)
+   - Falls back to optimized if original missing
+
+2. **Mistral OCR (Primary, always-on):**
    ```python
-   # Prefers ORIGINAL PDF (better quality)
-   chosen_path = document.file.path
-   # Falls back to optimized if original missing
+   mistral_service = MistralOCRService()
+   markdown_text = mistral_service.get_markdown(chosen_path)
+   # Returns page-marked markdown: "=== PAGE N ===\n[content]"
+   # Saved to document.markdown_file
    ```
+   - Uses `mistral-ocr-latest` with retry logic (4 attempts, exponential backoff)
+   - Returns `=== PAGE N ===` markers per page
 
-2. **Batch Processing (20 pages per batch):**
-   - For each page:
-     - **Try Digital Extraction First:**
-       ```python
-       direct_text = page.get_text("text")  # PyMuPDF
-       if len(direct_text.strip()) >= 50:
-           use_directly()  # Fast path
-       ```
-     - **Fallback to OCR (Scanned PDFs):**
-       ```python
-       pix = page.get_pixmap(matrix=fitz.Matrix(1.2, 1.2))
-       image = PIL.Image.from_bytes(pix.tobytes("png"))
-       send_to_gemini_ocr(image)  # Vision model
-       ```
-
-3. **Gemini OCR Prompt:**
-   ```
-   "You are a strict OCR engine."
-   "TASK: Transcribe images to Markdown"
-   "FORMAT: Start each page with === PAGE N ==="
-   "RULES: 
-     - No intro/summary
-     - Transcribe EXACTLY word-for-word
-     - Preserve tables in Markdown
-     - Output Vietnamese with correct accents"
-   ```
-
-4. **Retry Logic:**
+3. **Fallback (if Mistral OCR fails) — Gemini + PyMuPDF:**
+   - For each page (in batches of 20):
+     - **Digital pages** (`get_text()` >= 50 chars): direct text extraction
+     - **Scanned pages**: render at 1.2x scale -> send to Gemini as images
+   - Gemini OCR prompt produces `=== PAGE N ===` markers
    - 3 attempts per batch with exponential backoff
-   - 2-second sleep between batches (rate limit prevention)
 
-5. **Output Format:**
-   ```markdown
+4. **Output Format:**
+   ```
    === PAGE 1 ===
-   [Page 1 content...]
-   
+   [Page 1 content with Vietnamese accents preserved...]
+
    === PAGE 2 ===
    [Page 2 content...]
    ```
 
-6. **Debug Output:**
-   - Saves to `media/debug_markdown/document_{id}_extracted.md`
-   - Allows inspection of pre-chunking content
+5. **Debug Output:** Saved to `media/debug_markdown/document_{id}_extracted.md`
 
 ### Stage 2: Text Cleaning
-**Function:** `RAGService._clean_text_for_rag()`  
-**Location:** `backend/api/services.py:2020-2050`
+**Function:** `RAGService._clean_text_for_rag()`
 
 **Cleans:**
-- Repetitive headers/footers
-- OCR artifacts
-- Formatting glitches
+- Standard headers: "UY BAN CHUNG KHOAN NHA NUOC", "BAN CAO BACH", etc.
+- Looping phrase glitches via regex: `re.sub(r'(.{10,})\1+', r'\1', text)`
 
 ### Stage 3: Chunking Strategy
-**Location:** `backend/api/services.py:2098-2163`
 
 **Multi-Stage Approach:**
 
 1. **Page Segmentation:**
-   ```python
-   # Split by page markers
-   pages = split_on("=== PAGE N ===" or "--- PAGE N ---")
-   ```
+   - Supports both `=== PAGE N ===` and `--- PAGE N ---` markers
 
-2. **Header-Based Splitting:**
+2. **Header-Based Splitting (per page):**
    ```python
-   MarkdownHeaderTextSplitter(
-       headers_to_split_on=[
-           ("#", "Header 1"),
-           ("##", "Header 2"),
-           ("###", "Header 3")
-       ]
-   )
+   MarkdownHeaderTextSplitter(headers_to_split_on=[
+       ("#", "Header 1"), ("##", "Header 2"), ("###", "Header 3")
+   ])
    ```
 
 3. **Recursive Text Splitting:**
    ```python
    RecursiveCharacterTextSplitter(
-       chunk_size=800,           # Characters per chunk
-       chunk_overlap=100,        # Overlap for context
+       chunk_size=800,
+       chunk_overlap=100,
        separators=["\n\n", "\n", ".", " ", ""]
    )
    ```
 
-4. **Metadata Tagging:**
+4. **Metadata tagging:**
    ```python
-   for chunk in chunks:
-       chunk.metadata['page_number'] = page_num
+   chunk.metadata['page_number'] = page_num
    ```
 
-**Output:** ~200-500 chunks per document (depends on length)
+**Output:** Typically 200-500 `DocumentChunk` objects per document
 
-### Stage 4: Embedding Generation
-**Location:** `backend/api/services.py:2163-2230`
-
-**Configuration:**
-- **Model:** `models/text-embedding-004` (Google)
-- **Dimensions:** 768
-- **Batch Size:** 50 chunks per API call
-- **DB Write Interval:** 200 chunks per transaction
+### Stage 4: Embedding Generation & Storage
+**Embedding Model:** Mistral `mistral-embed-2312` (1024 dimensions)
 
 **Process:**
 1. For each batch of 50 chunks:
    ```python
-   embeddings = genai.embed_content(
-       model="models/text-embedding-004",
-       content=[chunk.page_content for chunk in batch],
-       task_type="retrieval_document"  # Optimized for search
+   resp = self.mistral_client.embeddings.create(
+       model="mistral-embed-2312",
+       inputs=batch_texts,
    )
    ```
+2. Add header context (H1/H2) as prefix to chunk content
+3. Compute `content_ascii = unidecode(final_content)` per chunk
+4. Create `DocumentChunk` with `content`, `content_ascii`, `page_number`, `embedding`
+5. Bulk insert every 200 chunks (`bulk_create(batch_size=500)`)
+6. Retry logic: 3 attempts, exponential backoff + jitter per batch
 
-2. Add header context to chunk content:
-   ```python
-   if 'Header 1' in metadata:
-       content = f"# {metadata['Header 1']}\n{content}"
-   ```
-
-3. Create `DocumentChunk` objects:
-   ```python
-   DocumentChunk(
-       document=document,
-       content=final_content,
-       page_number=page_num,
-       embedding=embedding_vector  # 768-dim array
-   )
-   ```
-
-4. Bulk insert every 200 chunks (performance optimization)
+**After all chunks saved:**
+```python
+# Single bulk update — ensures index and query use identical normalization
+DocumentChunk.objects.filter(document_id=document_id).update(
+    search_vector=SearchVector('content_ascii', config='simple')
+)
+```
 
 ### Stage 5: Vector Storage
-**Model:** `backend/api/models.py` - `DocumentChunk`
+**Model:** `backend/api/models.py` — `DocumentChunk`
 
-**Database Schema:**
 ```python
 class DocumentChunk:
-    document = ForeignKey(Document)
-    content = TextField()              # Chunk text
-    page_number = IntegerField()       # Source page
-    embedding = VectorField(dims=768)  # pgvector
-    created_at = DateTimeField()
-    
-    # HNSW Index for fast similarity search
+    document      = ForeignKey(Document)
+    content       = TextField()             # Original chunk text
+    content_ascii = TextField(null=True)    # unidecode() version for keyword search
+    page_number   = IntegerField()          # Source page
+    embedding     = VectorField(dimensions=1024)    # Mistral embed-2312
+    search_vector = SearchVectorField(null=True)    # tsvector (simple, ASCII)
+    created_at    = DateTimeField()
+
     indexes = [
-        HnswIndex(
-            fields=['embedding'],
-            m=16,                  # Max connections per layer
-            ef_construction=64,    # Dynamic candidate list size
-            opclasses=['vector_cosine_ops']  # Cosine similarity
-        )
+        HnswIndex(fields=['embedding'], m=16, ef_construction=64,
+                  opclasses=['vector_cosine_ops']),  # Fast ANN search
+        GinIndex(fields=['search_vector'])           # Fast keyword search
     ]
 ```
 
-### Stage 6: Query & Retrieval
-**Endpoint:** `POST /api/documents/{id}/chat/`  
-**Service:** `RAGService.chat()`  
-**Location:** `backend/api/services.py:2285-2470`
+### Stage 6: Query & Retrieval — Hybrid Search + Reranking
+**Endpoint:** `POST /api/documents/{id}/chat/`
+**Service:** `RAGService.chat()` -> `RAGService.hybrid_search()` -> `RAGService._rerank_chunks()`
 
-**Process:**
+#### 6a. Hybrid Search (RRF)
+```python
+def hybrid_search(document_id, query_text, top_k=10, k_fusion=60):
+    # 1. Semantic (Vector) Search
+    query_embedding = mistral_client.embeddings.create(
+        model="mistral-embed-2312", inputs=[query_text]
+    ).data[0].embedding
+    semantic_results = DocumentChunk.objects
+        .annotate(distance=CosineDistance('embedding', query_embedding))
+        .filter(distance__lt=0.85)
+        .order_by('distance')[:30]
 
-1. **Dual Retrieval Strategy:**
-   ```python
-   # Source 1: Structured data (priority for facts)
-   structured_info = document.extracted_data
-   # → Fund name, fees, dates, etc.
-   
-   # Source 2: Vector search (for explanations)
-   query_embedding = embed(user_query)
-   chunks = DocumentChunk.objects
-       .annotate(distance=CosineDistance('embedding', query_embedding))
-       .order_by('distance')[:25]  # Top 25 chunks
-   ```
+    # 2. Keyword Search (BM25-like, normalized)
+    ascii_query = remove_vietnamese_diacritics(query_text)
+    search_query = SearchQuery(ascii_query, config='simple')
+    keyword_results = DocumentChunk.objects
+        .filter(document_id=document_id, search_vector=search_query)
+        .annotate(rank=SearchRank(F('search_vector'), search_query))
+        .order_by('-rank')[:50]
 
-2. **Context Building:**
-   ```python
-   rag_context = "\n\n---\n\n".join([
-       f"=== PAGE {chunk.page_number} ===\n{chunk.content}"
-       for chunk in chunks
-   ])
-   ```
+    # 3. Reciprocal Rank Fusion: score = 1 / (k_fusion + rank + 1)
+    # 4. Return top_k by fused score
+```
 
-3. **Prompt Engineering:**
-   ```
-   "Bạn là trợ lý phân tích tài chính..."
-   
-   "NGUỒN 1: DỮ LIỆU CẤU TRÚC (ưu tiên cho Phí, Tên, Mã số)"
-   {structured_info}
-   
-   "NGUỒN 2: TRÍCH ĐOẠN VĂN BẢN (cho giải thích, chiến lược)"
-   {rag_context}
-   
-   "QUY TẮC:
-   1. Kiểm tra NGUỒN 1 trước
-   2. Nếu không đủ, dùng NGUỒN 2
-   3. Trả lời tiếng Việt, ngắn gọn"
-   ```
+**Why `content_ascii` matters:** Both the stored `search_vector` (built from `content_ascii`) and the query (stripped of diacritics) are normalized identically — ensuring "Quy" and "Qu?" match correctly.
 
-4. **Generation:**
-   ```python
-   chat = gemini_model.start_chat(history=previous_messages)
-   response = chat.send_message(system_prompt + user_query)
-   return response.text
-   ```
+#### 6b. Reranking (FlashRank)
+```
+RAG_ENABLE_RERANK=true
+FLASHRANK_MODEL=ms-marco-MiniLM-L-12-v2
+RAG_RERANK_TOP_K=5
+RAG_RETRIEVAL_CANDIDATES_K=15
+```
+- Fetches `max(RAG_RETRIEVAL_CANDIDATES_K, RAG_RERANK_TOP_K)` candidates from hybrid search
+- Reranks with cross-encoder FlashRank, returns top `RAG_RERANK_TOP_K`
+- Falls back to original RRF order if FlashRank unavailable or errors
 
-5. **Response Format:**
-   ```json
-   {
-     "answer": "Phí quản lý của quỹ là 1.2%/năm...",
-     "query": "phí quản lý là bao nhiêu",
-     "chunks_count": 150,
-     "contexts": ["context1", "context2", ...]  // Optional
-   }
-   ```
+#### 6c. Prompt & Generation
+```
+NGUON 1 (Structured): {structured_info from ExtractedFundData}
+NGUON 2 (Text):       {rag_context = top reranked chunks with page citations}
+USER QUERY:           {user_query}
+```
+
+**Chat providers (configurable via `RAG_CHAT_PROVIDER`):**
+
+| Provider | Model | Notes |
+|----------|-------|-------|
+| `ollama` (default) | `qwen2.5:7b` | Local, via OpenAI-compatible API |
+| `gemini` | `gemini-2.5-flash-lite` | Via `google.genai` new SDK |
+| `mistral` | `mistral-small-latest` | Via Mistral API |
+
+**Response format:**
+```json
+{
+  "text": "Answer text... [Trang 5]",
+  "contexts": ["chunk1...", "chunk2..."],
+  "structured_data_used": "...",
+  "citations": [{"chunk_id": 42, "page": 5, "quote": "..."}]
+}
+```
 
 ---
 
@@ -358,7 +326,7 @@ class DocumentChunk:
 
 ### Overview
 ```
-Load Dataset → Generate Embeddings → Run Metrics → Save Results
+Load CSV -> Trim Contexts -> Run Local Metrics -> Save Results
 ```
 
 ### Script Location
@@ -369,92 +337,52 @@ Load Dataset → Generate Embeddings → Run Metrics → Save Results
 
 ```csv
 question,answer,contexts,ground_truth
-"Tên quỹ TCSME?","Quỹ Đầu tư...","['context1', 'context2']","Tên chính thức..."
+"Ten quy TCSME?","Quy Dau tu...","['context1', 'context2']","Ten chinh thuc..."
 ```
 
-**Fields:**
-- `question`: User query
-- `answer`: RAG system's response
-- `contexts`: Retrieved chunks (string-serialized list)
-- `ground_truth`: Expected correct answer
+### Evaluation Configuration
 
-### Evaluation Process
+**Judge LLM:** Ollama `llama3.1:8b` (local, json mode, num_ctx=8192)
+**Embeddings:** Ollama `nomic-embed-text` (local)
+**Workers:** 1 (sequential to avoid Ollama OOM)
+**Timeout:** 420s per job, 8 retries
 
-1. **Load Dataset:**
-   ```python
-   df = pd.read_csv('ragas_dataset.csv')
-   
-   # Parse string lists to actual lists
-   df['contexts'] = df['contexts'].apply(ast.literal_eval)
-   ```
-
-2. **Create RAGAS Dataset:**
-   ```python
-   from datasets import Dataset
-   eval_dataset = Dataset.from_pandas(df)
-   ```
-
-3. **Configure Models:**
-   ```python
-   from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-   
-   # Judge LLM (evaluates quality)
-   judge_llm = ChatGoogleGenerativeAI(
-       model="gemini-2.0-flash-exp",
-       temperature=0  # Deterministic grading
-   )
-   
-   # Embeddings (for relevance metrics)
-   embeddings = GoogleGenerativeAIEmbeddings(
-       model="models/text-embedding-004"
-   )
-   ```
-
-4. **Run Metrics:**
-   ```python
-   from ragas import evaluate
-   from ragas.metrics import (
-       faithfulness,        # Answer grounded in contexts?
-       answer_relevancy,    # Answer relevant to question?
-       context_precision,   # Relevant contexts ranked high?
-       context_recall       # Ground truth in contexts?
-   )
-   
-   result = evaluate(
-       dataset=eval_dataset,
-       metrics=[
-           faithfulness,
-           answer_relevancy,
-           context_precision,
-           context_recall
-       ],
-       llm=judge_llm,
-       embeddings=embeddings
-   )
-   ```
-
-5. **Save Results:**
-   ```python
-   result_df = result.to_pandas()
-   result_df.to_csv('ragas_results.csv', index=False)
-   ```
-
-### Output Format
-**File:** `backend/ragas_results.csv`
-
-```csv
-question,answer,contexts,ground_truth,faithfulness,answer_relevancy,context_precision,context_recall
-"Tên quỹ?","...",["..."],"...",0.5,0.7,0.3,0.2
+**Context trimming (applied before evaluation):**
+```python
+MAX_CONTEXT_CHUNKS = 5      # Keep top-5 chunks only
+MAX_CHUNK_CHARS = 1200      # Hard cap per chunk
 ```
+
+### Metrics Used
+```python
+from ragas.metrics import (   # ragas.metrics (NOT .collections — incompatible with ChatOllama)
+    Faithfulness,
+    AnswerRelevancy,
+    ContextPrecision,
+    ContextRecall,
+)
+```
+
+### RunConfig
+```python
+RunConfig(
+    max_workers=1,
+    max_wait=420,
+    max_retries=8,
+)
+```
+
+### Output
+**File:** `ragas_results_local.csv`
 
 ### Metric Definitions
 
-| Metric | Range | Meaning | Good Score |
-|--------|-------|---------|------------|
-| **Faithfulness** | 0-1 | Answer supported by contexts | >0.7 |
-| **Answer Relevancy** | 0-1 | Answer addresses question | >0.8 |
-| **Context Precision** | 0-1 | Relevant chunks ranked high | >0.6 |
-| **Context Recall** | 0-1 | Ground truth in contexts | >0.7 |
+| Metric | Range | Meaning | Target |
+|--------|-------|---------|--------|
+| **Faithfulness** | 0-1 | Answer grounded in retrieved contexts | >0.7 |
+| **Answer Relevancy** | 0-1 | Answer addresses the question | >0.8 |
+| **Context Precision** | 0-1 | Relevant chunks ranked highest | >0.6 |
+| **Context Recall** | 0-1 | Ground truth covered by contexts | >0.7 |
 
 ---
 
@@ -463,77 +391,73 @@ question,answer,contexts,ground_truth,faithfulness,answer_relevancy,context_prec
 ### Backend Services
 
 #### 1. DocumentProcessingService
-**File:** `backend/api/services.py:1644-1850`
-- Manages async document processing
-- Orchestrates PDF optimization → extraction
-- Handles model selection (Gemini/Mistral)
+**File:** `backend/api/services.py`
+- Manages async threading for document processing
+- Orchestrates: PDF optimization -> AI extraction -> storage -> auto RAG ingestion
+- Model selection: `gemini`, `mistral`, `mistral-ocr`
+- Auto-retries extraction with original PDF if optimized PDF fails
 
 #### 2. GeminiOCRService
-**File:** `backend/api/services.py:~600-1200`
-- Structured data extraction
-- Vision API for scanned documents
-- Multimodal prompting
+**File:** `backend/api/services.py`
+- Uses `google.genai` new SDK (`genai.Client`)
+- Model: `gemini-2.5-flash-lite`
+- Uploads PDF via Files API, waits for processing, generates JSON with bounding boxes
+- Returns `{value, page, bbox}` structured fields
 
 #### 3. RAGService
-**File:** `backend/api/services.py:2006-2470`
-- Full text extraction for RAG
-- Chunking and embedding
-- Query handling and response generation
+**File:** `backend/api/services.py`
+- Primary extraction: Mistral OCR (always-on)
+- Fallback extraction: Gemini batch OCR + PyMuPDF
+- Chunking: MarkdownHeader + Recursive (800 chars, 100 overlap)
+- Embedding: Mistral `mistral-embed-2312` (1024 dims, batch=50)
+- Retrieval: Hybrid search (Vector + Keyword via RRF)
+- Reranking: FlashRank cross-encoder (optional)
+- Chat: Configurable provider (Ollama/Gemini/Mistral)
 
-#### 4. MistralOCRService / MistralOCRSmallService
-**File:** `backend/api/services.py:1200-1640`
-- Alternative extraction models
-- Pixtral Large for vision
-- Comparison benchmarking
+#### 4. MistralOCRService
+**File:** `backend/api/services.py`
+- `mistral-ocr-latest` for raw markdown extraction
+- Returns `=== PAGE N ===` markers
+- 4 attempts with exponential backoff + jitter
+
+#### 5. MistralOCRSmallService
+**File:** `backend/api/services.py`
+- `mistral-ocr-latest` for raw OCR
+- `mistral-small-latest` for JSON extraction
+- Used when `ocr_model='mistral-ocr'`
 
 ### Frontend Components
 
 #### 1. Dashboard
 **File:** `frontend/src/components/Dashboard.jsx`
-- Document list view
-- Upload interface
-- Search and filtering
+- Document list, upload interface, search and filtering
 
 #### 2. ChatPanel
 **File:** `frontend/src/components/ChatPanel.jsx`
-- RAG chat interface
-- Message history
-- Markdown rendering
+- RAG chat interface with markdown rendering and persistent history
 
 #### 3. FileUpload
 **File:** `frontend/src/components/FileUpload.jsx`
-- Drag-and-drop upload
-- Model selection
-- Progress tracking
+- Drag-and-drop upload, model selection, progress tracking
 
 ### Database Models
 
 #### Document
-**Primary model storing all document data**
-- File paths (original + optimized)
-- Processing status
-- Extracted data (JSONB)
-- Chat history (JSONB)
-- RAG ingestion status
+Primary model — file paths, processing status, extracted JSON, chat history, RAG status (queued/running/completed/failed with 0-100 progress %)
 
 #### ExtractedFundData
-**Normalized fund information**
-- 50+ fields as columns
-- Foreign key to Document
-- Optimized for queries
+Normalized fund fields as DB columns — 50+ fields, foreign key to Document
 
 #### DocumentChunk
-**Vector embeddings for RAG**
-- Content text
-- 768-dim embedding vector
-- Page number metadata
-- HNSW index for fast search
+Vector embeddings for RAG:
+- `content` — original chunk text
+- `content_ascii` — `unidecode()` version for keyword search normalization
+- `embedding` — 1024-dim vector (Mistral embed-2312)
+- `search_vector` — pre-computed `tsvector` from `content_ascii`, `config='simple'`
+- HNSW index (cosine) + GIN index (keyword)
 
 #### DocumentChangeLog
-**Audit trail**
-- User ID and timestamp
-- Field-level change tracking
-- Before/after values
+Field-level audit trail with before/after values
 
 ---
 
@@ -541,121 +465,128 @@ question,answer,contexts,ground_truth,faithfulness,answer_relevancy,context_prec
 
 ### Document Upload Flow
 ```
-┌──────────┐
-│  User    │
-│ Uploads  │
-│   PDF    │
-└────┬─────┘
-     │
++----------+
+|  User    |
+| Uploads  |
+|   PDF    |
++----+-----+
+     |
      v
-┌────────────────┐
-│  FileUpload    │
-│  Component     │
-└────┬───────────┘
-     │ POST /api/documents/
++----------------+
+|  FileUpload    |
+|  Component     |
++----+-----------+
+     | POST /api/documents/
      v
-┌────────────────────┐
-│  DocumentViewSet   │
-│   .create()        │
-└────┬───────────────┘
-     │
-     ├──> Save to media/documents/
-     │
-     ├──> Create Document record (status='pending')
-     │
-     └──> Start background thread
-          │
++--------------------+
+|  DocumentViewSet   |
+|   .create()        |
++----+---------------+
+     |
+     +-> Save to media/documents/
+     +-> Create Document record (status='pending')
+     +-> Start background thread
+          |
           v
-     ┌────────────────────────┐
-     │ DocumentProcessing     │
-     │ Service                │
-     │ ._process_document_task│
-     └────┬───────────────────┘
-          │
-          ├──> create_optimized_pdf()
-          │    └──> RapidOCR + keyword filtering
-          │
-          ├──> extract_structured_data()
-          │    └──> Gemini/Mistral vision API
-          │
-          └──> Save to Document.extracted_data
-               │
-               └──> Status = 'completed'
-```
-
-### RAG Query Flow
-```
-┌──────────┐
-│  User    │
-│  Query   │
-└────┬─────┘
-     │ "Phí quản lý?"
-     v
-┌────────────────┐
-│  ChatPanel     │
-└────┬───────────┘
-     │ POST /api/documents/{id}/chat/
-     v
-┌────────────────────┐
-│  RAGService.chat() │
-└────┬───────────────┘
-     │
-     ├──> 1. Get structured data
-     │       └──> document.extracted_data
-     │
-     ├──> 2. Generate query embedding
-     │       └──> Google Text-Embedding-004
-     │
-     ├──> 3. Vector search
-     │       └──> pgvector: CosineDistance
-     │            └──> Top 25 chunks
-     │
-     ├──> 4. Build context
-     │       ├──> Structured info
-     │       └──> Retrieved chunks
-     │
-     ├──> 5. Generate prompt
-     │       └──> "Nguồn 1... Nguồn 2..."
-     │
-     └──> 6. Call Gemini
-          └──> Response → User
+     +------------------------+
+     | DocumentProcessing     |
+     | Service                |
+     | ._process_document_task|
+     +----+-------------------+
+          |
+          +-> create_optimized_pdf()
+          |    +-> RapidOCR + keyword filtering
+          |    +-> Returns (path, page_map)
+          |
+          +-> extract_structured_data()
+          |    +-> Gemini 2.5 Flash Lite (default)
+          |    |    +-> google.genai Files API -> JSON + bbox
+          |    +-> Mistral Large (alternative)
+          |    +-> Mistral OCR + Small (alternative)
+          |
+          +-> Remap page numbers via page_map
+          |
+          +-> Save to Document.extracted_data + ExtractedFundData
+          |    +-> Status = 'completed'
+          |
+          +-> Auto-trigger RAG ingestion (if enabled)
+               +-> RAGService().ingest_document(doc_id) in new thread
 ```
 
 ### RAG Ingestion Flow
 ```
-┌────────────────┐
-│  Trigger:      │
-│  - Auto POST   │
-│  - Manual API  │
-└────┬───────────┘
-     │
++----------------+
+|  Trigger:      |
+|  - Auto POST   |
+|  - Manual API  |
++----+-----------+
+     |
      v
-┌────────────────────────┐
-│  RAGService            │
-│  .ingest_document()    │
-└────┬───────────────────┘
-     │
-     ├──> 1. Extract full text
-     │       ├──> Open PDF (original preferred)
-     │       ├──> For each page:
-     │       │    ├──> Try get_text() (digital)
-     │       │    └──> Fallback: Gemini OCR (scanned)
-     │       └──> Save to debug_markdown/
-     │
-     ├──> 2. Clean text
-     │       └──> Remove artifacts
-     │
-     ├──> 3. Chunk
-     │       ├──> Split by === PAGE N ===
-     │       ├──> Markdown headers
-     │       └──> Recursive (800 chars, 100 overlap)
-     │
-     ├──> 4. Embed (batches of 50)
-     │       └──> Google Embedding API
-     │
-     └──> 5. Store
-          └──> Bulk insert DocumentChunk
-               └──> pgvector HNSW index
++------------------------+
+|  RAGService            |
+|  .ingest_document()    |
++----+-------------------+
+     |
+     +-> 1. Extract full text
+     |       +-> Mistral OCR (primary, always-on)
+     |       |    +-> mistral-ocr-latest -> === PAGE N === markdown
+     |       +-> Fallback: PyMuPDF + Gemini batch OCR
+     |
+     +-> 2. Clean text (_clean_text_for_rag)
+     |       +-> Remove headers, fix loops
+     |
+     +-> 3. Chunk
+     |       +-> Split by === PAGE N ===
+     |       +-> MarkdownHeaderTextSplitter (H1/H2/H3)
+     |       +-> RecursiveCharacterTextSplitter (800, overlap 100)
+     |
+     +-> 4. Embed (batches of 50)
+     |       +-> Mistral mistral-embed-2312 (1024 dims)
+     |       +-> Per chunk: content_ascii = unidecode(final_content)
+     |
+     +-> 5. Bulk insert DocumentChunk (every 200)
+     |       +-> content, content_ascii, embedding, page_number
+     |
+     +-> 6. Populate search_vector (single bulk UPDATE)
+             +-> SearchVector('content_ascii', config='simple')
+```
+
+### RAG Query Flow
+```
++----------+
+|  User    |
+|  Query   |
++----+-----+
+     | "Phi quan ly?"
+     v
++----------------+
+|  ChatPanel     |
++----+-----------+
+     | POST /api/documents/{id}/chat/
+     v
++--------------------+
+|  RAGService.chat() |
++----+---------------+
+     |
+     +-> 1. Get structured data
+     |       +-> ExtractedFundData (fees, names, dates, etc.)
+     |
+     +-> 2. Hybrid Search
+     |       +-> Semantic: Mistral embed -> CosineDistance < 0.85 -> top 30
+     |       +-> Keyword:  remove_diacritics(query) -> search_vector -> top 50
+     |       +-> RRF merge -> top RAG_RETRIEVAL_CANDIDATES_K (default 15)
+     |
+     +-> 3. Rerank (FlashRank ms-marco-MiniLM-L-12-v2)
+     |       +-> Top RAG_RERANK_TOP_K (default 5) chunks
+     |
+     +-> 4. Build prompt
+     |       +-> NGUON 1: structured_info (fees, names, dates)
+     |       +-> NGUON 2: reranked chunks with PAGE citations
+     |
+     +-> 5. Generate response
+             +-> Ollama qwen2.5:7b (default)
+             +-> Gemini 2.5 Flash Lite (optional)
+             +-> Mistral small (optional)
 ```
 
 ---
@@ -670,16 +601,20 @@ CHUNK_OVERLAP = 100        # Overlap between chunks
 
 ### Embedding Parameters
 ```python
-EMBEDDING_MODEL = "models/text-embedding-004"
-EMBEDDING_DIMENSIONS = 768
+EMBEDDING_MODEL = "mistral-embed-2312"
+EMBEDDING_DIMENSIONS = 1024
 BATCH_SIZE = 50            # Chunks per API call
 DB_WRITE_INTERVAL = 200    # Chunks per DB write
 ```
 
 ### Retrieval Parameters
 ```python
-TOP_K_CHUNKS = 25          # Number of chunks retrieved
+SEMANTIC_CANDIDATES = 30         # Top semantic results (distance < 0.85)
+KEYWORD_CANDIDATES  = 50         # Top keyword results
+RETRIEVAL_CANDIDATES_K = 15      # Candidates sent to reranker (RAG_RETRIEVAL_CANDIDATES_K)
+RERANK_TOP_K = 5                 # Final chunks after reranking (RAG_RERANK_TOP_K)
 SIMILARITY_METRIC = "cosine"
+K_FUSION = 60                    # RRF constant
 ```
 
 ### Vector Index Parameters
@@ -687,91 +622,49 @@ SIMILARITY_METRIC = "cosine"
 INDEX_TYPE = "HNSW"
 M = 16                     # Max connections per layer
 EF_CONSTRUCTION = 64       # Dynamic candidate list size
+OPCLASS = "vector_cosine_ops"
 ```
 
----
-
-## Known Issues & Troubleshooting
-
-### Low RAGAS Scores (Current Issue)
-**Problem:** Scores ~0.2-0.36 across all metrics
-
-**Root Causes:**
-1. **Poor OCR quality** → Repetitive garbage text indexed
-2. **Low retrieval precision** → Only 1-2 relevant chunks out of 25
-3. **Lack of filtering** → Garbage chunks not filtered before indexing
-
-**Solutions:**
-- Add chunk quality validation before indexing
-- Filter repetitive patterns (e.g., `unique_words/total_words < 0.3`)
-- Improve OCR on source documents
-- Implement semantic deduplication
-
-### OCR Artifacts
-**Symptoms:** 
-- Repeated phrases like "chi phí/phí/giá dịch vụ..." × 500 times
-- "Trong thời hạn 05 ngày..." repeated endlessly
-
-**Investigation:**
-```bash
-# Check extracted markdown
-cat backend/media/debug_markdown/document_*_extracted.md | grep -o "chi phí" | wc -l
-
-# Check if issue is in source or chunking
-python manage.py shell
->>> from api.services import RAGService
->>> rag = RAGService()
->>> text = rag._extract_content_for_rag(document)
->>> # Analyze repetition patterns
+### RAGAS Evaluation Parameters
+```python
+JUDGE_MODEL = "llama3.1:8b"        # Ollama local model
+EMBED_MODEL = "nomic-embed-text"   # Ollama local embeddings
+MAX_CONTEXT_CHUNKS = 5             # Chunks per sample sent to judge
+MAX_CHUNK_CHARS = 1200             # Hard cap per chunk
+MAX_WORKERS = 1
+MAX_WAIT = 420                     # seconds per job
+MAX_RETRIES = 8
 ```
-
----
-
-## Future Improvements
-
-1. **Context Quality Filtering**
-   - Pre-index validation
-   - Semantic deduplication
-   - Relevance scoring
-
-2. **Retrieval Optimization**
-   - Reduce top_k to 10-15
-   - Add cross-encoder reranking
-   - Implement minimum similarity threshold
-
-3. **Chunking Strategy**
-   - Increase to 1500 chars (RAG_IMPROVEMENTS.md)
-   - Add semantic boundary detection
-   - Preserve table integrity
-
-4. **Monitoring**
-   - Track RAG performance metrics
-   - Log retrieval quality
-   - Alert on OCR failures
-
----
-
-## API Endpoints Reference
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/documents/` | POST | Upload document |
-| `/api/documents/{id}/` | GET | Get document details |
-| `/api/documents/{id}/ingest_for_rag/` | POST | Trigger RAG ingestion |
-| `/api/documents/{id}/rag_status/` | GET | Check RAG status |
-| `/api/documents/{id}/chat/` | POST | Chat with document |
-| `/api/documents/{id}/extracted-data/` | GET | Get structured data |
 
 ---
 
 ## Environment Variables
 
 ```env
-# Google AI
-GOOGLE_API_KEY=...
+# Google AI (new SDK: google-genai)
+GEMINI_API_KEY=...
 
-# Mistral AI (optional)
+# Mistral AI (required — used for both OCR and RAG embeddings)
 MISTRAL_API_KEY=...
+
+# RAG chat provider: ollama | gemini | mistral
+RAG_CHAT_PROVIDER=ollama
+
+# Ollama (when RAG_CHAT_PROVIDER=ollama)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+
+# Mistral chat model (when RAG_CHAT_PROVIDER=mistral)
+MISTRAL_CHAT_MODEL=mistral-small-latest
+
+# FlashRank reranker
+RAG_ENABLE_RERANK=true
+FLASHRANK_MODEL=ms-marco-MiniLM-L-12-v2
+RAG_RERANK_TOP_K=5
+RAG_RETRIEVAL_CANDIDATES_K=15
+
+# Auto RAG ingestion on upload
+AUTO_RAG_INGEST_ON_UPLOAD=true
 
 # Database
 DATABASE_URL=postgresql://...
@@ -782,5 +675,37 @@ MEDIA_ROOT=backend/media/
 
 ---
 
-**Document Version:** 1.0  
-**System Version:** Based on codebase analysis as of Feb 9, 2026
+## API Endpoints Reference
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/documents/` | POST | Upload document |
+| `/api/documents/{id}/` | GET | Get document details |
+| `/api/documents/{id}/ingest_for_rag/` | POST | Trigger RAG ingestion |
+| `/api/documents/{id}/rag_status/` | GET | Check RAG status (0-100%) |
+| `/api/documents/{id}/chat/` | POST | Chat with document (RAG) |
+| `/api/documents/{id}/extracted-data/` | GET | Get structured data |
+
+---
+
+## Known Issues & Troubleshooting
+
+### Low RAGAS Scores
+**Root Causes:**
+1. OCR quality noise -> repetitive or garbage text indexed
+2. Low retrieval precision before reranking
+3. Hybrid search mismatch if `search_vector` and query normalization differ
+
+**Fixes applied:**
+- `content_ascii` stored per chunk at ingestion time (via `unidecode`)
+- `search_vector` built from `content_ascii` using `SearchVector('content_ascii', config='simple')` bulk update — ensures index/query use identical normalization
+- FlashRank reranker reduces final context to top-5 most relevant chunks
+- Context trimmed to max 5 chunks x 1200 chars for evaluation
+
+### google-generativeai Conflict
+The deprecated `google-generativeai` package must **not** be installed alongside `google-genai`. It triggers a protobuf descriptor crash via `instructor`'s conditional import chain. `requirements.txt` now uses `google-genai` only.
+
+---
+
+**Document Version:** 2.0
+**System Version:** Based on codebase as of February 19, 2026

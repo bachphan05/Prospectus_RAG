@@ -54,9 +54,11 @@ A comprehensive enterprise-grade solution for extracting, analyzing, and queryin
 - **Framework**: Django 5.x, Django REST Framework
 - **Database**: PostgreSQL 16 + `pgvector`
 - **AI/ML**: 
-  - **OCR / Extraction**: Google Gemini 2.5 Flash Lite SDK (`gemini-2.5-flash-lite`)
+  - **RAG Extraction (primary)**: Mistral OCR (`mistral-ocr-latest`) for highest-fidelity markdown
+  - **OCR / Extraction**: Google Gemini 2.5 Flash Lite (`gemini-2.5-flash-lite`) via `google-genai` SDK
   - **OCR / Extraction (alt)**: Mistral Small (`mistral-small-latest`) + Mistral OCR (`mistral-ocr-latest`)
   - **Embeddings**: Mistral `mistral-embed-2312` (1024 dimensions)
+  - **Reranker**: FlashRank `ms-marco-MiniLM-L-12-v2` (cross-encoder, optional)
   - **RAG Chat**: Ollama (`qwen2.5:7b`, default) / Gemini 2.5 Flash Lite / Mistral (configurable via `RAG_CHAT_PROVIDER`)
   - `langchain-text-splitters` for RAG chunking
   - `PyMuPDF` (Fitz) & `RapidOCR` for PDF manipulation and highlight snapping
@@ -72,10 +74,13 @@ A comprehensive enterprise-grade solution for extracting, analyzing, and queryin
 ## Setup Instructions
 
 ### Prerequisites
-- Python 3.12+ (Recommended)
+- Python 3.13+ (Recommended)
 - Node.js 18+
 - PostgreSQL 15+ with `pgvector` extension installed
-- [Ollama](https://ollama.com/) with `qwen2.5:7b` and `nomic-embed-text` models pulled (required for default RAG chat and RAGAS evaluation)
+- [Ollama](https://ollama.com/) with the following models pulled:
+  - `qwen2.5:7b` — default RAG chat
+  - `llama3.1:8b` — RAGAS evaluation judge
+  - `nomic-embed-text` — RAGAS evaluation embeddings
 - API Keys for Google Gemini and/or Mistral AI
 
 ### Backend Configuration
@@ -164,32 +169,35 @@ To ensure the reliability of financial data retrieval, this project implements a
 
 ### Performance Evolution
 
-We benchmarked the retrieval system before and after implementing a custom Layout-Aware OCR pipeline.
+We benchmarked the retrieval system across three generations of the pipeline.
 
-| Metric | Baseline (Standard OCR) | **Optimized (Mistral OCR + Markdown)** | Improvement |
+> ⚠️ **Note on comparability:** v1 and v2 were evaluated on **different question sets**, so scores are not directly comparable. Additionally, v1 used **semantic (vector) search only**; hybrid keyword search was introduced in v2. The table below reflects directional progress across pipeline generations, not a controlled A/B test.
+
+| Metric | Baseline (Standard OCR) | v1 (Semantic Search only) | **v2 (Hybrid Search + FlashRank)** |
 | :--- | :---: | :---: | :---: |
-| **Context Recall** | 0.2812 | **0.9630** |  **+242%** |
-| **Context Precision** | 0.1217 | **0.6573** |  **+440%** |
-| **Faithfulness** | 0.3464 | **0.6543** |  **+89%** |
-| **Answer Relevancy** | 0.3777 | **0.2800** | *Optimization in progress* |
+| **Faithfulness** | 0.3464 | 0.6543 | **0.7135** |
+| **Answer Relevancy** | 0.3777 | 0.2800 | **0.3762** |
+| **Context Precision** | 0.1217 | 0.6573 | **0.7126** |
+| **Context Recall** | 0.2812 | 0.9630 | **0.8250** |
+
+> **Evaluation setup — v2:** Judge LLM — local Ollama `llama3.1:8b` (JSON mode, `num_ctx=8192`); Embeddings — `nomic-embed-text`; Context — top 5 chunks × 1200 chars max; evaluated on a separate, independently generated question set.
 
 ### Key Optimization Strategies implemented:
 
 1.  **Structured Markdown Extraction**: Switched from raw text extraction to **Mistral OCR**, which preserves document structure (tables, headers). This resolved "infinite loop" hallucinations in the vector space and allowed the embedding model to correctly interpret complex fee schedules.
 2.  **Noise Reduction Pipeline**: Implemented a heuristic cleaning layer to strip repetitive headers (e.g., "ỦY BAN CHỨNG KHOÁN") and footers that were poisoning the vector search results, leading to the massive jump in **Context Precision**.
 3.  **Hybrid Search (RRF)**: Replaced pure vector retrieval with Reciprocal Rank Fusion of dense embeddings (Mistral `mistral-embed-2312`) and sparse keyword search (PostgreSQL `tsvector` GIN index). This boosted Context Recall significantly on queries containing specific fund codes, fee values, and proper nouns.
-4.  **Local Evaluation Pipeline**: Transitioned the "Judge" LLM to a local **Ollama (qwen2.5:7b)** instance with `nomic-embed-text` for embedding scoring. This bypassed API rate limits (HTTP 429) and allowed for cost-effective, intensive regression testing. Sequential execution (`max_workers=1`) prevents timeouts on resource-constrained machines.
+4.  **FlashRank Cross-Encoder Reranking**: After the initial hybrid retrieval (15 candidates), a **FlashRank `ms-marco-MiniLM-L-12-v2`** cross-encoder reranks all candidates against the query and selects the top 5. This directly cut hallucinations by removing marginally-related chunks that passed the vector distance threshold but were not genuinely relevant — raising Faithfulness from 0.65 to **0.71**. Context Precision also improved as the most topically precise chunks were consistently promoted to the top of the context window. Crucially, ASCII normalization was applied consistently: `content_ascii` (via `unidecode()`) is stored per chunk, and both the `search_vector` GIN index and live queries use the same `config='simple'` normalization — ensuring Vietnamese diacritic variants like `Quỹ` and `Quy` are matched correctly.
+5.  **Local Evaluation Pipeline**: Transitioned the "Judge" LLM to a local **Ollama `llama3.1:8b`** instance (JSON mode, `num_ctx=8192`) with `nomic-embed-text` for embedding scoring. This bypassed API rate limits (HTTP 429) and allowed for cost-effective, intensive regression testing. Sequential execution (`max_workers=1`) prevents timeouts on resource-constrained machines.
 ## Future Improvements
 
 The following roadmap outlines planned enhancements to elevate the system's capabilities:
 
 1.  **Distributed Task Queue**: Migrate from Python threading to Celery/Redis for robust, horizontally scalable background processing.
 2.  **Advanced RAG Techniques**:
-    -   Add **Re-ranking** step (e.g., cross-encoder) to further optimize chunk relevance before passing to the LLM.
     -   **Multi-Document Querying**: Allow users to ask questions across the entire document corpus (e.g., "Compare the management fees of all Balanced Funds").
 3.  **Authentication & Multi-Tenancy**: Implement OAuth2/JWT authentication to support multiple organizations with isolated data context.
 4.  **Feedback Loop**: Implement User-in-the-Loop (HITL) fine-tuning, where manual corrections to extracted data are fed back to improve future prompts or fine-tune smaller models.
-5.  **CI/CD Pipeline**: GitHub Actions workflows for automated testing, linting, and containerized deployment (Docker/Kubernetes).
 5.  **CI/CD Pipeline**: GitHub Actions workflows for automated testing, linting, and containerized deployment (Docker/Kubernetes).
 
 ## License

@@ -23,7 +23,7 @@ from pgvector.django import CosineDistance
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 import PIL.Image
 import PIL.ImageDraw
-from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db.models import F
 from unidecode import unidecode
 
@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 
 
 def _lazy_import_genai():
-    """Lazy import google.generativeai to avoid deprecation warnings unless actually needed."""
-    import google.generativeai as genai
+    """Lazy import google.genai (new SDK) to avoid top-level import overhead."""
+    import google.genai as genai
     return genai
 
 
@@ -293,15 +293,15 @@ class GeminiOCRService:
     """Service for OCR using Gemini 2.5 Flash Lite API"""
     
     def __init__(self):
-        genai = _lazy_import_genai()
+        import google.genai as genai
         # Configure Gemini API
         api_key = os.getenv('GEMINI_API_KEY')
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is not set")
-        
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash-lite')
-        self._genai = genai
+
+        self._client = genai.Client(api_key=api_key)
+        self._genai = genai  # Keep reference for types access
+        self._model_name = 'gemini-2.5-flash-lite'
     
     def extract_structured_data(self, pdf_path: str) -> dict:
         """
@@ -313,31 +313,35 @@ class GeminiOCRService:
             file_size = os.path.getsize(pdf_path)
             logger.info(f"Uploading PDF to Gemini: {pdf_path} (Size: {file_size} bytes)")
             
-            uploaded_file = self._genai.upload_file(pdf_path, mime_type="application/pdf")
+            uploaded_file = self._client.files.upload(
+                path=pdf_path,
+                config=self._genai.types.UploadFileConfig(mime_type="application/pdf"),
+            )
             logger.info(f"Uploaded file URI: {uploaded_file.uri}")
 
             # Wait for processing to finish before generating content
             import time
             while uploaded_file.state.name == "PROCESSING":
                 time.sleep(2)
-                uploaded_file = self._genai.get_file(uploaded_file.name)
+                uploaded_file = self._client.files.get(name=uploaded_file.name)
 
             if uploaded_file.state.name == "FAILED":
                 raise ValueError("File processing failed on Gemini API")
 
             prompt = self._get_extraction_prompt()
-            
+
             try:
                 # Use temperature=0 and top_p=0 for maximum deterministic, consistent results
-                generation_config = self._genai.types.GenerationConfig(
+                generation_config = self._genai.types.GenerateContentConfig(
                     temperature=0,
                     top_p=0.1,
                     top_k=1,
-                    response_mime_type="application/json"
+                    response_mime_type="application/json",
                 )
-                response = self.model.generate_content(
-                    [uploaded_file, prompt],
-                    generation_config=generation_config
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=[uploaded_file, prompt],
+                    config=generation_config,
                 )
             except Exception as gen_error:
                 logger.error(f"Gemini generate_content failed: {gen_error}")
@@ -347,7 +351,7 @@ class GeminiOCRService:
 
             # Cleanup uploaded file
             try:
-                self._genai.delete_file(uploaded_file.name)
+                self._client.files.delete(name=uploaded_file.name)
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup uploaded file: {cleanup_error}")
 
@@ -2245,13 +2249,13 @@ class RAGService:
         self.chat_model = None
         
         if self.chat_provider == 'gemini':
-            genai = _lazy_import_genai()
+            import google.genai as genai
             api_key = os.getenv('GEMINI_API_KEY')
             if not api_key:
                 raise ValueError("GEMINI_API_KEY not set (required when RAG_CHAT_PROVIDER=gemini)")
-            genai.configure(api_key=api_key)
-            self._genai = genai
-            self.chat_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            self._gemini_client = genai.Client(api_key=api_key)
+            self._genai = genai  # Keep for types access
+            self.gemini_model_name = 'gemini-2.5-flash-lite'
             logger.info("Using Gemini for RAG chat")
         elif self.chat_provider == 'ollama':
             logger.info(f"Using Ollama ({self.ollama_model}) at {self.ollama_base_url} for RAG chat")
@@ -2479,6 +2483,7 @@ class RAGService:
                     chunks_to_create.append(DocumentChunk(
                         document=document,
                         content=final_content,
+                        content_ascii=unidecode(final_content),
                         page_number=page_num,
                         embedding=embeddings[j]
                     ))
@@ -2510,19 +2515,13 @@ class RAGService:
             total_chunks = document.chunks.count()
             logger.info(f"Successfully saved {total_chunks} vector chunks total.")
 
-            # Populate search_vector for keyword (full-text) search
-            # Use ASCII-ified content (strip Vietnamese diacritics) so that
-            # keyword search works regardless of whether the query has accents.
+            # Populate search_vector for keyword (full-text) search.
+            # Build it from the already-stored content_ascii field so that the
+            # index and the query are normalized identically (both ASCII, simple config).
             try:
-                from django.db import connection
-                chunks_for_fts = DocumentChunk.objects.filter(document_id=document_id)
-                with connection.cursor() as cursor:
-                    for chunk in chunks_for_fts.iterator():
-                        ascii_content = remove_vietnamese_diacritics(chunk.content)
-                        cursor.execute(
-                            "UPDATE api_documentchunk SET search_vector = to_tsvector('simple', %s) WHERE id = %s",
-                            [ascii_content, chunk.id],
-                        )
+                DocumentChunk.objects.filter(document_id=document_id).update(
+                    search_vector=SearchVector('content_ascii', config='simple')
+                )
                 logger.info(f"Populated search_vector (ASCII) for {total_chunks} chunks (document {document_id}).")
             except Exception as e:
                 logger.warning(f"Failed to populate search_vector for document {document_id}: {e}")
@@ -2694,35 +2693,20 @@ THÔNG TIN CƠ BẢN ĐÃ ĐƯỢC TRÍCH XUẤT (từ Document.extracted_data):
             # ...existing code...
 
             system_prompt = f"""
-Bạn là một Robot Kiểm toán Tài chính có tư duy logic cực kỳ nghiêm khắc. Nhiệm vụ của bạn là trích xuất thông tin từ tài liệu quỹ đầu tư với độ chính xác tuyệt đối (100%).
+Bạn là một Trợ lý Tài chính Chuyên nghiệp. Hãy trả lời câu hỏi bằng tiếng Việt dựa TRÊN MỨC ĐỘ ƯU TIÊN của NGUỒN 1 và NGUỒN 2.
 
-### QUY TẮC CỐT LÕI (SỐNG CÒN):
-1. **NGUYÊN TẮC "ZERO EXTERNAL KNOWLEDGE":** Bạn KHÔNG CÓ kiến thức về thế giới bên ngoài. Bạn CHỈ biết những gì được viết trong NGUỒN 1 và NGUỒN 2. 
-   - Nếu tài liệu không ghi, bạn PHẢI trả lời: "Tôi không tìm thấy thông tin này trong tài liệu."
-   - TUYỆT ĐỐI không được nói "Theo tôi biết...", "Thông thường...", hoặc "Dựa trên quy định chung...".
+### QUY TẮC CỐT LÕI (BẮT BUỘC):
+1. **Trực tiếp và Ngắn gọn:** KHÔNG sử dụng các câu rào trước đón sau như "Dựa vào tài liệu..." hay "Tôi tìm thấy...". Hãy trả lời thẳng vào vấn đề.
+2. **Xử lý lỗi OCR (Dung sai):** Văn bản nguồn được trích xuất bằng OCR nên có thể bị lỗi gõ chữ hoặc sai số nhẹ (VD: '2561 GCH' thay vì '250 GCN'). Nếu ngữ cảnh hoàn toàn khớp (như ngày tháng cấp phép), hãy coi đó là cùng một thông tin và trả lời trực tiếp mà KHÔNG CẦN giải thích về sự sai lệch.
+3. **Hiểu Từ Viết Tắt (Được phép dùng kiến thức nền):** Bạn ĐƯỢC PHÉP sử dụng kiến thức chung ĐỂ NHẬN DIỆN CÁC TỪ VIẾT TẮT (Ví dụ: hiểu rằng 'BIDV' chính là 'Ngân hàng TMCP Đầu tư và Phát triển Việt Nam', 'TCBS' là 'Chứng khoán Kỹ thương').
+4. **Trích dẫn (Bắt buộc):** Luôn kết thúc một câu chứa thông tin bằng [Trang X].
+5. **Thiếu thông tin:** Chỉ khi thông tin hoàn toàn không có, mới trả lời: "Tài liệu không đề cập đến thông tin này."
 
-2. **XÁC THỰC HAI BƯỚC (BẮT BUỘC):** - Bước 1: Tìm câu văn chứa câu trả lời trong nguồn.
-   - Bước 2: So khớp từng con số, từng chữ cái giữa câu trả lời và nguồn. Nếu sai lệch dù chỉ 1 đơn vị, phải sửa lại hoặc báo không thấy.
+### NGỮ CẢNH:
+NGUỒN 1 (Dữ liệu cấu trúc): {structured_info}
+NGUỒN 2 (Văn bản RAG): {rag_context}
 
-3. **ĐỊNH DẠNG TRÍCH DẪN:** - Phải trích dẫn nguồn ngay sau mệnh đề chứa thông tin đó. 
-   - Định dạng: [Trang X]. Nếu lấy từ dữ liệu cấu trúc: [Dữ liệu hệ thống].
-
-4. **XỬ LÝ CON SỐ:** - Giữ nguyên định dạng số trong tài liệu (ví dụ: 1,2% hoặc 1.2%). Không tự ý làm tròn.
-
-### QUY TRÌNH SUY NGHĨ (Nội tâm):
-Trước khi trả lời, hãy tự hỏi: "Câu này có bằng chứng trực tiếp trong text không? Số trang nằm ở đâu?".
-
-### CẤU TRÚC CÂU TRẢ LỜI:
-- Trả lời trực tiếp, ngắn gọn, đi thẳng vào vấn đề.
-- Sử dụng danh sách gạch đầu dòng nếu có nhiều ý.
-- Cuối câu trả lời, nếu có thể, hãy trích dẫn nguyên văn một đoạn ngắn từ tài liệu để làm bằng chứng.
-
----
-NGUỒN 1 - DỮ LIỆU CẤU TRÚC:
-{structured_info}
-
-NGUỒN 2 - TRÍCH ĐOẠN TÀI LIỆU:
-{rag_context}
+CÂU HỎI CỦA NGƯỜI DÙNG: {user_query}
 """
             # Generate response based on provider
             response_text = ""
@@ -2770,15 +2754,23 @@ NGUỒN 2 - TRÍCH ĐOẠN TÀI LIỆU:
                 response_text = chat_response.choices[0].message.content
                 
             else:  # gemini
-                # Prepare chat history for Gemini
+                # Prepare chat history for Gemini (new SDK uses Content/Part objects)
                 chat_history = []
                 if history:
                     for h in history:
                         role = "user" if h.get('sender') == 'user' else "model"
-                        chat_history.append({"role": role, "parts": [h.get('text', '')]})
+                        chat_history.append(
+                            self._genai.types.Content(
+                                role=role,
+                                parts=[self._genai.types.Part.from_text(text=h.get('text', ''))],
+                            )
+                        )
 
                 # Start chat session
-                chat = self.chat_model.start_chat(history=chat_history)
+                chat = self._gemini_client.chats.create(
+                    model=self.gemini_model_name,
+                    history=chat_history,
+                )
                 response = chat.send_message(f"{system_prompt}\n\nCÂU HỎI: {user_query}")
                 response_text = response.text
             
@@ -2943,7 +2935,10 @@ NGUỒN 2 - TRÍCH ĐOẠN TÀI LIỆU:
                     batch_text = ""
                     for attempt in range(3):
                         try:
-                            response = self.chat_model.generate_content(model_inputs)
+                            response = self._gemini_client.models.generate_content(
+                                model=self.gemini_model_name,
+                                contents=model_inputs,
+                            )
                             batch_text = response.text or ""
                             if batch_text.strip():
                                 break  # success
