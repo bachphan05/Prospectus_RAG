@@ -314,7 +314,7 @@ class GeminiOCRService:
             logger.info(f"Uploading PDF to Gemini: {pdf_path} (Size: {file_size} bytes)")
             
             uploaded_file = self._client.files.upload(
-                path=pdf_path,
+                file=pdf_path,
                 config=self._genai.types.UploadFileConfig(mime_type="application/pdf"),
             )
             logger.info(f"Uploaded file URI: {uploaded_file.uri}")
@@ -2781,7 +2781,7 @@ CÂU HỎI CỦA NGƯỜI DÙNG: {user_query}
                         citations.append({
                             "chunk_id": chunk.id,
                             "page": chunk.page_number,
-                            "quote": (chunk.content or "")[:400]
+                            "quote": (chunk.content or "")[:800]
                         })
                     except Exception:
                         continue

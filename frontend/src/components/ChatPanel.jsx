@@ -138,6 +138,77 @@ function makeComponents(onPageClick) {
 }
 
 /**
+ * SourcesPanel – collapsible list of RAG chunk cards below an AI reply.
+ */
+function SourcesPanel({ citations, activeChunkId, onViewChunk }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  if (!citations || citations.length === 0) return null;
+
+  return (
+    <div className="mt-2 border-t border-gray-100 pt-2">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 transition-colors"
+      >
+        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
+               l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <span className="font-medium">
+          {isExpanded ? 'Ẩn nguồn' : `Xem nguồn (${citations.length} đoạn)`}
+        </span>
+        <svg
+          className={`w-3 h-3 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isExpanded && (
+        <div className="mt-2 space-y-2">
+          {citations.map((citation, idx) => {
+            const isActive = activeChunkId != null && activeChunkId === citation.chunk_id;
+            return (
+              <div
+                key={citation.chunk_id ?? idx}
+                className={`rounded-lg border text-xs transition-colors ${
+                  isActive
+                    ? 'border-blue-400 bg-blue-50'
+                    : 'border-gray-200 bg-gray-50 hover:border-blue-200 hover:bg-blue-50/40'
+                }`}
+              >
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-inherit">
+                  <span className={`font-semibold ${ isActive ? 'text-blue-700' : 'text-gray-600' }`}>
+                    Trang {citation.page}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onViewChunk(citation)}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    Xem trong tài liệu
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="px-3 py-2 text-gray-700 leading-relaxed whitespace-pre-wrap line-clamp-4">
+                  {citation.quote}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * AiMessage – renders an AI response with full markdown + clickable page refs.
  */
 function AiMessage({ text, onPageClick }) {
@@ -434,9 +505,9 @@ function ChatPanel({ document, onClose }) {
     }
   };
 
-  const openPageFromChat = async (pageNum, quote = '') => {
+  const openPageFromChat = async (pageNum, quote = '', chunkId = null) => {
     if (!document?.id) return;
-    setActiveCitation({ page: pageNum, quote });
+    setActiveCitation({ page: pageNum, quote, chunkId });
     setLoadingPageCtx(true);
     setPageContext(null);
     try {
@@ -661,14 +732,21 @@ function ChatPanel({ document, onClose }) {
                       )}
                       <div className="flex-1 min-w-0">
                         {message.sender === 'ai' ? (
-                          <AiMessage
-                            text={message.text}
-                            citations={message.citations || []}
-                            onPageClick={(p) => openPageFromChat(
-                              p,
-                              (message.citations || []).find(c => c.page === p)?.quote || ''
-                            )}
-                          />
+                          <>
+                            <AiMessage
+                              text={message.text}
+                              citations={message.citations || []}
+                              onPageClick={(p) => {
+                                const cit = (message.citations || []).find(c => c.page === p);
+                                openPageFromChat(p, cit?.quote || '', cit?.chunk_id ?? null);
+                              }}
+                            />
+                            <SourcesPanel
+                              citations={message.citations || []}
+                              activeChunkId={activeCitation?.chunkId}
+                              onViewChunk={(cit) => openPageFromChat(cit.page, cit.quote, cit.chunk_id ?? null)}
+                            />
+                          </>
                         ) : (
                           <p className="text-sm whitespace-pre-wrap">{message.text}</p>
                         )}
@@ -756,7 +834,11 @@ function ChatPanel({ document, onClose }) {
                     <p className="text-sm font-semibold text-gray-900">
                       Trang {activeCitation.page}
                     </p>
-                    <p className="text-xs text-gray-500">Source page</p>
+                    <p className="text-xs text-gray-500">
+                      {pageContext?.matched_bboxes?.length > 0
+                        ? `${pageContext.matched_bboxes.length} đoạn được tìm thấy`
+                        : 'Trang nguồn'}
+                    </p>
                   </div>
                   <button
                     onClick={() => { setActiveCitation(null); setPageContext(null); }}

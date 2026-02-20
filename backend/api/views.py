@@ -713,20 +713,61 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
             matched_bboxes = []
             if quote:
-                quote_norm = _re.sub(r'\s+', ' ', quote).strip()
-                candidates = [quote_norm]
-                if len(quote_norm) > 220:
-                    candidates.append(quote_norm[:220])
-                words = quote_norm.split()
-                if len(words) > 8:
+                # Strip markdown formatting so the text matches the PDF's raw content
+                def _strip_markdown(text):
+                    text = _re.sub(r'#{1,6}\s*', '', text)          # headings
+                    text = _re.sub(r'\*{1,3}([^*\n]+)\*{1,3}', r'\1', text)  # bold/italic
+                    text = _re.sub(r'`[^`]*`', '', text)             # inline code
+                    text = _re.sub(r'\|', ' ', text)                 # table pipes
+                    text = _re.sub(r'-{3,}', ' ', text)              # HR / table dividers
+                    text = _re.sub(r'!\[.*?\]\(.*?\)', '', text)     # images
+                    text = _re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # links
+                    text = _re.sub(r'\s+', ' ', text).strip()
+                    return text
+
+                clean_quote = _strip_markdown(quote)
+
+                # Build a list of increasingly short candidates to try
+                candidates = []
+                # 1. Full cleaned quote (up to 200 chars to keep search fast)
+                if clean_quote:
+                    candidates.append(clean_quote[:200])
+                # 2. First 100 chars
+                if len(clean_quote) > 60:
+                    candidates.append(clean_quote[:100])
+                # 3. First 12 words
+                words = clean_quote.split()
+                if len(words) >= 6:
+                    candidates.append(' '.join(words[:12]))
+                # 4. First 8 words
+                if len(words) >= 4:
                     candidates.append(' '.join(words[:8]))
+                # 5. Each sentence that is >= 25 chars
+                for sent in _re.split(r'(?<=[.!?。])\s+', clean_quote):
+                    sent = sent.strip()
+                    if 25 <= len(sent) <= 200:
+                        candidates.append(sent)
+                # 6. Per-line candidates (Mistral OCR produces clean lines per record)
+                for line in clean_quote.splitlines():
+                    line = line.strip()
+                    if 20 <= len(line) <= 200:
+                        candidates.append(line)
+
+                # Deduplicate while preserving order
+                seen = set()
+                deduped = []
+                for c in candidates:
+                    key = c.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(c)
 
                 rects = []
-                for q in candidates:
+                for q in deduped:
                     if not q:
                         continue
                     try:
-                        found = page.search_for(q)
+                        found = page.search_for(q, quads=False)
                     except Exception:
                         found = []
                     if found:
